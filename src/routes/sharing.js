@@ -1,5 +1,6 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
+const { body, validationResult } = require('express-validator');
 const { Op } = require('sequelize');
 const { Document, Permission, Notification, User } = require('../models');
 const { auth } = require('../middleware/auth');
@@ -7,17 +8,21 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-router.post('/documents/:id/share', auth, async (req, res) => {
+router.post('/documents/:id/share', auth, [
+  body('email').optional().isEmail().normalizeEmail().withMessage('Email invalide'),
+  body('niveau').isIn(['lecture', 'ecriture']).withMessage('Niveau: lecture ou ecriture'),
+  body('expiration').optional().isISO8601().withMessage('Date d\'expiration invalide'),
+], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
     const doc = await Document.findOne({
       where: { id: req.params.id, proprietaire_id: req.user.id }
     });
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
 
     const { email, niveau, expiration } = req.body;
-    if (!['lecture', 'ecriture'].includes(niveau)) {
-      return res.status(400).json({ message: 'Niveau de permission invalide' });
-    }
 
     let targetUser = null;
     const permData = {

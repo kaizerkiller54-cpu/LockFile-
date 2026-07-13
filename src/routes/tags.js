@@ -4,6 +4,7 @@ const { Op } = require('sequelize');
 const { Tag } = require('../models');
 const { auth } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { sanitizeString } = require('../utils/sanitize');
 
 const router = express.Router();
 
@@ -20,14 +21,18 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-router.post('/', auth, [
-  body('nom').trim().notEmpty().withMessage('Nom du tag requis')
-], async (req, res) => {
+const tagFields = [
+  body('nom').trim().notEmpty().isLength({ max: 50 }).withMessage('Nom du tag requis (max 50)'),
+  body('couleur').optional().matches(/^#[0-9a-f]{6}$/i).withMessage('Couleur invalide (format hex: #RRGGBB)'),
+];
+
+router.post('/', auth, tagFields, async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { nom, couleur } = req.body;
+    const nom = sanitizeString(req.body.nom);
+    const couleur = req.body.couleur || '#6366f1';
     const existing = await Tag.findOne({
       where: { nom: nom.toLowerCase(), proprietaire_id: req.user.id }
     });
@@ -35,7 +40,7 @@ router.post('/', auth, [
 
     const tag = await Tag.create({
       nom: nom.toLowerCase(),
-      couleur: couleur || '#6366f1',
+      couleur,
       proprietaire_id: req.user.id
     });
     res.status(201).json({ tag });
@@ -45,14 +50,17 @@ router.post('/', auth, [
   }
 });
 
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', auth, tagFields, async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
     const tag = await Tag.findOne({
       where: { id: req.params.id, proprietaire_id: req.user.id }
     });
     if (!tag) return res.status(404).json({ message: 'Tag non trouvé' });
-    if (req.body.nom) tag.nom = req.body.nom.toLowerCase();
-    if (req.body.couleur) tag.couleur = req.body.couleur;
+    if (req.body.nom !== undefined) tag.nom = sanitizeString(req.body.nom).toLowerCase();
+    if (req.body.couleur !== undefined) tag.couleur = req.body.couleur;
     await tag.save();
     res.json({ tag });
   } catch (error) {

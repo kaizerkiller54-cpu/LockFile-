@@ -29,7 +29,10 @@ const API = {
       throw new Error('Session expirée');
     }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Erreur serveur');
+    if (!res.ok) {
+      const msg = data.message || (data.errors && data.errors.map(e => e.msg || e.message).join(', ')) || 'Erreur serveur';
+      throw new Error(msg);
+    }
     return data;
   },
 

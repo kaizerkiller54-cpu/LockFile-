@@ -6,6 +6,7 @@ const { User } = require('../models');
 const { auth } = require('../middleware/auth');
 const { getClient, getAuthClient } = require('../config/supabase');
 const logger = require('../utils/logger');
+const { sanitizeString } = require('../utils/sanitize');
 
 const router = express.Router();
 
@@ -18,20 +19,25 @@ const generateToken = (user) => {
 };
 
 router.post('/register', [
-  body('username').trim().isLength({ min: 3 }).withMessage('Username doit contenir au moins 3 caractères'),
+  body('username').trim().isLength({ min: 3, max: 30 }).withMessage('Username: 3-30 caractères'),
   body('email').isEmail().normalizeEmail().withMessage('Email invalide'),
-  body('password').isLength({ min: 6 }).withMessage('Mot de passe doit contenir au moins 6 caractères'),
-  body('nom').trim().notEmpty().withMessage('Nom requis'),
-  body('prenom').trim().notEmpty().withMessage('Prénom requis'),
+  body('password').isLength({ min: 6 }).withMessage('Mot de passe: min 6 caractères'),
+  body('nom').trim().notEmpty().isLength({ max: 100 }).withMessage('Nom requis (max 100)'),
+  body('prenom').trim().notEmpty().isLength({ max: 100 }).withMessage('Prénom requis (max 100)'),
   body('type').isIn(['particulier', 'organisation']).withMessage('Type invalide'),
-  body('nombre_employes').if(body('type').equals('organisation')).isInt({ min: 1 }).withMessage('Nombre d\'employés requis pour une organisation')
+  body('nombre_employes').if(body('type').equals('organisation')).isInt({ min: 1 }).withMessage('Nombre d\'employés requis'),
+  body('telephone').optional().trim().isLength({ max: 20 }).withMessage('Téléphone trop long'),
+  body('poste').optional().trim().isLength({ max: 100 }).withMessage('Poste trop long'),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-    const { username, email, password, nom, prenom, type, nombre_employes } = req.body;
+    const { email, password, type, nombre_employes } = req.body;
+    const username = sanitizeString(req.body.username);
+    const nom = sanitizeString(req.body.nom);
+    const prenom = sanitizeString(req.body.prenom);
     const existingUser = await User.findOne({
       where: { [Op.or]: [{ email }, { username }] }
     });
@@ -125,18 +131,32 @@ router.get('/me', auth, async (req, res) => {
   res.json({ user: req.user.toJSON() });
 });
 
-router.put('/profile', auth, async (req, res) => {
+router.put('/profile', auth, [
+  body('nom').optional().trim().isLength({ max: 100 }).withMessage('Nom trop long'),
+  body('prenom').optional().trim().isLength({ max: 100 }).withMessage('Prénom trop long'),
+  body('telephone').optional().trim().isLength({ max: 20 }).withMessage('Téléphone trop long'),
+  body('poste').optional().trim().isLength({ max: 100 }).withMessage('Poste trop long'),
+  body('langue').optional().isIn(['fr', 'en', 'es', 'de', 'pt']).withMessage('Langue invalide'),
+  body('type').optional().isIn(['particulier', 'organisation']).withMessage('Type invalide'),
+  body('nombre_employes').optional().isInt({ min: 1 }).withMessage('Nombre d\'employés invalide'),
+], async (req, res) => {
   try {
-    const updates = ['nom', 'prenom', 'telephone', 'poste', 'langue', 'type', 'nombre_employes', 'preferences'];
-    updates.forEach(field => {
-      if (req.body[field] !== undefined) {
-        if (field === 'preferences') {
-          req.user.preferences = { ...req.user.preferences, ...req.body.preferences };
-        } else {
-          req.user[field] = req.body[field];
-        }
-      }
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const sanitized = {};
+    ['nom', 'prenom', 'telephone', 'poste'].forEach(f => {
+      if (req.body[f] !== undefined) sanitized[f] = sanitizeString(req.body[f]);
     });
+    ['langue', 'type', 'nombre_employes'].forEach(f => {
+      if (req.body[f] !== undefined) sanitized[f] = req.body[f];
+    });
+    Object.keys(sanitized).forEach(field => {
+      req.user[field] = sanitized[field];
+    });
+    if (req.body.preferences) {
+      req.user.preferences = { ...req.user.preferences, ...req.body.preferences };
+    }
     await req.user.save();
     res.json({ user: req.user.toJSON() });
   } catch (error) {
@@ -146,8 +166,8 @@ router.put('/profile', auth, async (req, res) => {
 });
 
 router.put('/password', auth, [
-  body('currentPassword').notEmpty(),
-  body('newPassword').isLength({ min: 6 })
+  body('currentPassword').notEmpty().withMessage('Mot de passe actuel requis'),
+  body('newPassword').isLength({ min: 6, max: 128 }).withMessage('Nouveau mot de passe: 6-128 caractères'),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);

@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { Folder, Document } = require('../models');
 const { auth } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { sanitizeString, sanitizeOptional } = require('../utils/sanitize');
 
 const router = express.Router();
 
@@ -48,20 +49,29 @@ router.get('/tree', auth, async (req, res) => {
   }
 });
 
-router.post('/', auth, [
-  body('nom').trim().notEmpty().withMessage('Nom du dossier requis')
-], async (req, res) => {
+const folderFields = [
+  body('nom').trim().notEmpty().isLength({ max: 100 }).withMessage('Nom du dossier requis (max 100)'),
+  body('description').optional().trim().isLength({ max: 500 }).withMessage('Description trop longue'),
+  body('couleur').optional().matches(/^#[0-9a-f]{6}$/i).withMessage('Couleur invalide'),
+  body('icone').optional().trim().isLength({ max: 50 }).withMessage('Icône trop longue'),
+  body('parent').optional({ values: 'falsy' }).isInt().withMessage('Parent invalide'),
+];
+
+router.post('/', auth, folderFields, async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { nom, description, parent, couleur, icone } = req.body;
+    const nom = sanitizeString(req.body.nom);
+    const description = sanitizeOptional(req.body.description);
+    const couleur = req.body.couleur || '#4f46e5';
+    const icone = req.body.icone || 'folder';
     const folder = await Folder.create({
       nom,
       description: description || '',
-      parent_id: parent || null,
-      couleur: couleur || '#4f46e5',
-      icone: icone || 'folder',
+      parent_id: req.body.parent || null,
+      couleur,
+      icone,
       proprietaire_id: req.user.id
     });
     logger.info(`Dossier créé: ${folder.nom} par ${req.user.username}`);
@@ -72,16 +82,20 @@ router.post('/', auth, [
   }
 });
 
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', auth, folderFields, async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
     const folder = await Folder.findOne({
       where: { id: req.params.id, proprietaire_id: req.user.id }
     });
     if (!folder) return res.status(404).json({ message: 'Dossier non trouvé' });
 
-    ['nom', 'description', 'couleur', 'icone'].forEach(field => {
-      if (req.body[field] !== undefined) folder[field] = req.body[field];
-    });
+    if (req.body.nom !== undefined) folder.nom = sanitizeString(req.body.nom);
+    if (req.body.description !== undefined) folder.description = sanitizeString(req.body.description);
+    if (req.body.couleur !== undefined) folder.couleur = req.body.couleur;
+    if (req.body.icone !== undefined) folder.icone = sanitizeString(req.body.icone);
     if (req.body.parent !== undefined) folder.parent_id = req.body.parent || null;
 
     await folder.save();

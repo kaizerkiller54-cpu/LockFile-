@@ -12,6 +12,9 @@ const fs = require('fs');
 
 const app = express();
 
+// Trust proxy (Railway, Render, etc.)
+app.set('trust proxy', 1);
+
 // Ensure required directories exist
 ['uploads', 'logs'].forEach(dir => {
   const p = path.join(__dirname, dir);
@@ -26,12 +29,24 @@ app.use(helmet({
 app.use(cors({ origin: true, credentials: true }));
 
 // Rate limiting
-const limiter = rateLimit({
+const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 20,
+  message: { message: 'Trop de tentatives, réessayez plus tard' }
+});
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 150,
   message: { message: 'Trop de requêtes, veuillez réessayer plus tard' }
 });
-app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 20 }));
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  message: { message: 'Trop d\'uploads, réessayez plus tard' }
+});
+
+app.use('/api/auth', authLimiter);
+app.use('/api', apiLimiter);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -42,7 +57,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // API Routes
 app.use('/api/auth', require('./src/routes/auth'));
-app.use('/api/documents', require('./src/routes/documents'));
+app.use('/api/documents', uploadLimiter, require('./src/routes/documents'));
 app.use('/api/folders', require('./src/routes/folders'));
 app.use('/api/tags', require('./src/routes/tags'));
 app.use('/api/users', require('./src/routes/users'));

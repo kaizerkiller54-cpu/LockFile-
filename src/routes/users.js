@@ -1,17 +1,36 @@
 const express = require('express');
+const { body, validationResult } = require('express-validator');
 const { Op } = require('sequelize');
 const { User } = require('../models');
 const { auth, checkRole } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { sanitizeString } = require('../utils/sanitize');
 
 const router = express.Router();
 
-router.post('/', auth, checkRole('admin'), async (req, res) => {
+router.post('/', auth, checkRole('admin'), [
+  body('username').trim().isLength({ min: 3, max: 30 }).withMessage('Username: 3-30 caractères'),
+  body('email').isEmail().normalizeEmail().withMessage('Email invalide'),
+  body('password').isLength({ min: 6 }).withMessage('Mot de passe: min 6 caractères'),
+  body('nom').trim().notEmpty().isLength({ max: 100 }).withMessage('Nom requis'),
+  body('prenom').trim().notEmpty().isLength({ max: 100 }).withMessage('Prénom requis'),
+  body('role').optional().isIn(['admin', 'utilisateur', 'lecteur']).withMessage('Rôle invalide'),
+  body('type').optional().isIn(['particulier', 'organisation']).withMessage('Type invalide'),
+  body('nombre_employes').if(body('type').equals('organisation')).isInt({ min: 1 }).withMessage('Nombre d\'employés requis'),
+], async (req, res) => {
   try {
-    const { username, email, password, nom, prenom, role, type, nombre_employes } = req.body;
-    if (!username || !email || !password || !nom || !prenom) {
-      return res.status(400).json({ message: 'Champs requis manquants' });
-    }
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const username = sanitizeString(req.body.username);
+    const email = req.body.email;
+    const password = req.body.password;
+    const nom = sanitizeString(req.body.nom);
+    const prenom = sanitizeString(req.body.prenom);
+    const role = req.body.role || 'utilisateur';
+    const type = req.body.type || 'particulier';
+    const nombre_employes = type === 'organisation' ? (req.body.nombre_employes || null) : null;
+
     const existing = await User.findOne({
       where: { [Op.or]: [{ email }, { username }] }
     });
@@ -20,9 +39,9 @@ router.post('/', auth, checkRole('admin'), async (req, res) => {
     }
     const user = await User.create({
       username, email, password, nom, prenom,
-      role: role || 'utilisateur',
-      type: type || 'particulier',
-      nombre_employes: type === 'organisation' ? (nombre_employes || null) : null
+      role,
+      type,
+      nombre_employes
     });
     logger.info(`Admin ${req.user.username} a créé l'utilisateur: ${username}`);
     res.status(201).json({ user: user.toJSON() });

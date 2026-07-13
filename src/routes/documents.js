@@ -1,11 +1,13 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
+const { body, query, validationResult } = require('express-validator');
 const { Document, Folder, Tag, Version, Notification, Permission, sequelize } = require('../models');
 const { auth } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const logger = require('../utils/logger');
 const { encryptFile, decryptFile, decompressBuffer } = require('../utils/crypto');
+const { sanitizeString, sanitizeOptional, sanitizeTags } = require('../utils/sanitize');
 const storage = require('../utils/storage');
 const fs = require('fs');
 const path = require('path');
@@ -106,14 +108,30 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-router.post('/', auth, upload.single('fichier'), async (req, res) => {
+const validateDocInput = [
+  body('titre').optional().trim().isLength({ max: 255 }).withMessage('Titre trop long (max 255)'),
+  body('description').optional().trim().isLength({ max: 5000 }).withMessage('Description trop longue'),
+  body('dossier').optional({ values: 'falsy' }).isInt().withMessage('Dossier invalide'),
+  body('tags').optional().isArray().withMessage('Tags doit être un tableau'),
+  body('favori').optional().isBoolean().withMessage('Favori doit être un booléen'),
+  body('commentaire').optional().trim().isLength({ max: 500 }).withMessage('Commentaire trop long'),
+];
+
+router.post('/', auth, upload.single('fichier'), validateDocInput, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'Fichier requis' });
 
-    const { titre, description, dossier, tags } = req.body;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { dossier, tags } = req.body;
+    const titre = sanitizeString(req.body.titre) || req.file.originalname.replace(/\.[^/.]+$/, '');
+    const description = sanitizeString(req.body.description) || '';
+    const tagIds = sanitizeTags(tags);
+
     const docData = {
-      titre: titre || req.file.originalname.replace(/\.[^/.]+$/, ''),
-      description: description || '',
+      titre,
+      description,
       nom_fichier: req.file.filename,
       nom_original: req.file.originalname,
       type_fichier: req.file.mimetype,
@@ -125,8 +143,7 @@ router.post('/', auth, upload.single('fichier'), async (req, res) => {
 
     const doc = await Document.create(docData);
 
-    if (tags) {
-      const tagIds = Array.isArray(tags) ? tags : JSON.parse(tags);
+    if (tagIds.length > 0) {
       await doc.setTags(tagIds);
     }
 
@@ -166,20 +183,23 @@ router.post('/', auth, upload.single('fichier'), async (req, res) => {
   }
 });
 
-router.put('/:id', auth, upload.single('fichier'), async (req, res) => {
+router.put('/:id', auth, upload.single('fichier'), validateDocInput, async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
     const doc = await Document.findOne({
       where: { id: req.params.id, proprietaire_id: req.user.id }
     });
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
 
-    if (req.body.titre) doc.titre = req.body.titre;
-    if (req.body.description !== undefined) doc.description = req.body.description;
+    if (req.body.titre !== undefined) doc.titre = sanitizeString(req.body.titre);
+    if (req.body.description !== undefined) doc.description = sanitizeString(req.body.description);
     if (req.body.dossier !== undefined) doc.dossier_id = req.body.dossier || null;
     if (req.body.favori !== undefined) doc.favori = req.body.favori === 'true' || req.body.favori === true;
 
     if (req.body.tags) {
-      const tagIds = Array.isArray(req.body.tags) ? req.body.tags : JSON.parse(req.body.tags);
+      const tagIds = sanitizeTags(req.body.tags);
       await doc.setTags(tagIds);
     }
 
@@ -227,17 +247,19 @@ router.put('/:id', auth, upload.single('fichier'), async (req, res) => {
   }
 });
 
-router.patch('/:id/tags', auth, async (req, res) => {
+router.patch('/:id/tags', auth, [
+  body('tags').isArray({ min: 1 }).withMessage('Liste de tags valide requise')
+], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
     const doc = await Document.findOne({
       where: { id: req.params.id, proprietaire_id: req.user.id }
     });
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
 
-    const { tags } = req.body;
-    if (!tags) return res.status(400).json({ message: 'Liste de tags requise' });
-
-    const tagIds = Array.isArray(tags) ? tags : JSON.parse(tags);
+    const tagIds = sanitizeTags(req.body.tags);
     await doc.setTags(tagIds);
 
     const reloaded = await Document.findByPk(doc.id, { include: docIncludes });
