@@ -20,7 +20,7 @@ It combines cloud storage (e.g., Supabase, Firebase, or S3) with a database for 
 ## 🏗️ Tech Stack
 - **Backend**: Node.js + Express
 - **Database**: MongoDB or PostgreSQL
-- **Storage**: Supabase Storage / AWS S3 / Firebase Storage
+- **Storage**: Supabase Storage / AWS S3 
 - **Frontend**: React or Vue
 - **Auth**: JWT (JSON Web Token)
 

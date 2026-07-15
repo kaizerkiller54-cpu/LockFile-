@@ -48,6 +48,7 @@ const App = {
     router.add('/trash', () => TrashPage.render());
     router.add('/admin', () => AdminPage.render());
     router.add('/backup', () => BackupPage.render());
+    router.add('/scan', () => ScanPage.render());
     router.add('/search', () => SearchPage.render());
     router.add('/profile', () => ProfilePage.render());
     router.add('/settings', () => SettingsPage.render());

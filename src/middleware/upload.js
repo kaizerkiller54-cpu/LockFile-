@@ -26,6 +26,8 @@ const fileFilter = (req, file, cb) => {
     'image/png',
     'image/gif',
     'image/webp',
+    'image/tiff',
+    'image/bmp',
     'image/svg+xml',
     'text/plain',
     'text/csv',

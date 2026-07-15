@@ -7,6 +7,10 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { connectDB } = require('./src/config/db');
 const { init: initSupabase } = require('./src/config/supabase');
+const queue = require('./src/config/queue');
+const ocrService = require('./src/services/ocrService');
+const imageProcessor = require('./src/services/imageProcessor');
+const searchService = require('./src/services/searchService');
 const logger = require('./src/utils/logger');
 const fs = require('fs');
 
@@ -26,7 +30,11 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: false
 }));
-app.use(cors({ origin: true, credentials: true }));
+const corsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
+  : true;
+app.use(cors({ origin: corsOrigins, credentials: true }));
+app.options('*', cors());
 
 // Rate limiting
 const authLimiter = rateLimit({
@@ -65,6 +73,7 @@ app.use('/api/search', require('./src/routes/search'));
 app.use('/api/notifications', require('./src/routes/notifications'));
 app.use('/api/sharing', require('./src/routes/sharing'));
 app.use('/api/backup', require('./src/routes/backup'));
+app.use('/api/scan', require('./src/routes/scan'));
 
 // SPA fallback
 app.get('*', (req, res) => {
@@ -92,6 +101,10 @@ const start = async () => {
   try {
     await connectDB();
     initSupabase();
+    queue.init();
+    ocrService.init();
+    imageProcessor.init();
+    searchService.init();
     app.listen(PORT, () => {
       logger.info(`Serveur démarré sur http://localhost:${PORT}`);
     });

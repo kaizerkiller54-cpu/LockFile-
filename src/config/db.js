@@ -58,6 +58,11 @@ const connectDB = async () => {
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_id VARCHAR(255) UNIQUE`
       );
     } catch (e) { console.warn('Column check supabase_id:', e.message); }
+    try {
+      await sequelize.query(
+        `ALTER TABLE documents ADD COLUMN IF NOT EXISTS contenu_ocr TEXT`
+      );
+    } catch (e) { console.warn('Column check contenu_ocr:', e.message); }
   } catch (error) {
     console.warn(`⚠ PostgreSQL non disponible (${error.message})`);
     console.warn('⚠ L\'application fonctionnera sans persistance de données');

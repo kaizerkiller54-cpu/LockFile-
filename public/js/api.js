@@ -1,5 +1,5 @@
 const API = {
-  baseUrl: '/api',
+  baseUrl: (window.API_BASE_URL || '') + '/api',
   token: localStorage.getItem('token'),
 
   setToken(token) {
@@ -122,6 +122,10 @@ const API = {
   updateUserRole(id, role) { return this.put(`/users/${id}/role`, { role }); },
   toggleUserActive(id) { return this.put(`/users/${id}/toggle-active`); },
   deleteUser(id) { return this.delete(`/users/${id}`); },
+
+  // Scan
+  scanUpload(formData) { return this.upload('/scan/upload', formData); },
+  scanStatus(jobId) { return this.get(`/scan/status/${jobId}`); },
 
   // Backup (admin)
   createBackup() { return this.post('/backup/export'); },

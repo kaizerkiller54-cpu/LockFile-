@@ -68,6 +68,10 @@ const Document = sequelize.define('Document', {
   firebase_path: {
     type: DataTypes.STRING(500),
     allowNull: true
+  },
+  contenu_ocr: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
 }, {
   tableName: 'documents',
