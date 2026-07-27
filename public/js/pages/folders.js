@@ -11,7 +11,7 @@ const FoldersPage = {
           <button class="btn btn-primary" id="newFolderBtn"><i class="fas fa-folder-plus"></i> <span data-i18n="folders.new">Nouveau dossier</span></button>
         </div>
       </div>
-      <div id="foldersContainer"><p class="text-center text-muted" data-i18n="common.loading">Chargement...</p></div>
+      <div id="foldersContainer">${Skeleton.card(6)}</div>
     `;
     I18N.apply();
     document.getElementById('newFolderBtn').onclick = () => this.showFolderModal();
@@ -26,20 +26,23 @@ const FoldersPage = {
         container.innerHTML = '<div class="empty-state"><i class="fas fa-folder-open"></i><h3>Aucun dossier</h3><p>Créez des dossiers pour organiser vos documents</p></div>';
         return;
       }
-      container.innerHTML = `<div class="doc-grid">${data.folders.map(f => `
+      container.innerHTML = `<div class="doc-grid">${data.folders.map(f => {
+        const safeNom = (f.nom || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        return `
         <div class="doc-card" style="cursor:pointer">
-          <div onclick="router.navigate('#/documents?dossier=${f.id}')">
+          <div onclick="router.navigate('/documents?dossier=${f.id}')">
             <div class="doc-card-icon" style="background:${f.couleur}15;color:${f.couleur}"><i class="fas fa-folder"></i></div>
             <div class="doc-card-title">${f.nom}</div>
             <div class="doc-card-meta">${f.documentCount || 0} document(s)</div>
           </div>
           <div class="doc-card-actions" style="opacity:1;position:static;margin-top:12px;flex-wrap:wrap">
             <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();FoldersPage.addToFolder('${f.id}')"><i class="fas fa-cloud-upload-alt"></i> Uploader</button>
-            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();FoldersPage.editFolder('${f.id}','${f.nom}','${f.couleur}')"><i class="fas fa-edit"></i></button>
+            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();App.shareFolder('${f.id}','${safeNom}')"><i class="fas fa-share-alt"></i></button>
+            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();FoldersPage.editFolder('${f.id}','${safeNom}','${f.couleur}')"><i class="fas fa-edit"></i></button>
             <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();FoldersPage.deleteFolder('${f.id}')"><i class="fas fa-trash"></i></button>
           </div>
-        </div>
-      `).join('')}</div>`;
+        </div>`;
+      }).join('')}</div>`;
     } catch { document.getElementById('foldersContainer').innerHTML = '<p class="text-center text-muted">Erreur de chargement</p>'; }
   },
 

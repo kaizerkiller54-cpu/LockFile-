@@ -13,32 +13,34 @@ const DashboardPage = {
           </button>
         </div>
       </div>
-      <div class="stat-grid" id="statGrid">
-        <div class="stat-card"><div class="stat-icon" style="background:var(--primary-bg);color:var(--primary)"><i class="fas fa-file-alt"></i></div><div class="stat-info"><div class="stat-value" id="statTotal">-</div><div class="stat-label" data-i18n="dashboard.totalDocs">Total documents</div></div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;color:#d97706"><i class="fas fa-clock"></i></div><div class="stat-info"><div class="stat-value" id="statRecent">-</div><div class="stat-label" data-i18n="dashboard.recent">Ajoutés cette semaine</div></div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:#fce7f3;color:#db2777"><i class="fas fa-star"></i></div><div class="stat-info"><div class="stat-value" id="statFav">-</div><div class="stat-label" data-i18n="dashboard.favorites">Favoris</div></div></div>
-        <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;color:#059669"><i class="fas fa-share-alt"></i></div><div class="stat-info"><div class="stat-value" id="statShared">-</div><div class="stat-label" data-i18n="dashboard.shared">Partagés</div></div></div>
-      </div>
+      <div class="stat-grid" id="statGrid">${Skeleton.stats(4)}</div>
       <div class="card mb-4">
         <div class="card-header"><h3 class="card-title" data-i18n="dashboard.recentDocs">Documents récents</h3><a href="#/documents" class="btn btn-sm btn-text">Voir tout</a></div>
-        <div class="card-body" id="recentDocs"><p class="text-center text-muted" data-i18n="common.loading">Chargement...</p></div>
+        <div class="card-body" id="recentDocs">${Skeleton.list(4)}</div>
       </div>
     `;
     I18N.apply();
     document.getElementById('dashUploadBtn').onclick = () => App.showUploadModal();
-    await this.loadStats();
-    await this.loadRecent();
+    this.loadStats();
+    this.loadRecent();
   },
 
   async loadStats() {
     try {
-      if (!document.getElementById('statTotal')) return;
+      const grid = document.getElementById('statGrid');
+      if (!grid) return;
       const data = await API.getDocumentStats();
-      document.getElementById('statTotal').textContent = data.total;
-      document.getElementById('statRecent').textContent = data.recents;
-      document.getElementById('statFav').textContent = data.favoris;
-      document.getElementById('statShared').textContent = data.partages;
-    } catch (e) { document.querySelectorAll('.stat-value').forEach(el => el.textContent = '0'); console.error('Stats:', e); }
+      grid.innerHTML = `
+        <div class="stat-card"><div class="stat-icon" style="background:var(--primary-bg);color:var(--primary)"><i class="fas fa-file-alt"></i></div><div class="stat-info"><div class="stat-value">${data.total}</div><div class="stat-label" data-i18n="dashboard.totalDocs">Total documents</div></div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;color:#d97706"><i class="fas fa-clock"></i></div><div class="stat-info"><div class="stat-value">${data.recents}</div><div class="stat-label" data-i18n="dashboard.recent">Ajoutés cette semaine</div></div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:#fce7f3;color:#db2777"><i class="fas fa-star"></i></div><div class="stat-info"><div class="stat-value">${data.favoris}</div><div class="stat-label" data-i18n="dashboard.favorites">Favoris</div></div></div>
+        <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;color:#059669"><i class="fas fa-share-alt"></i></div><div class="stat-info"><div class="stat-value">${data.partages}</div><div class="stat-label" data-i18n="dashboard.shared">Partagés</div></div></div>
+      `;
+      I18N.apply();
+    } catch (e) {
+      const grid = document.getElementById('statGrid');
+      if (grid) grid.innerHTML = `<div class="empty-state"><p>Erreur chargement statistiques</p></div>`;
+    }
   },
 
   async loadRecent() {

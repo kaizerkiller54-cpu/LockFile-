@@ -1,7 +1,7 @@
 const AdminPage = {
   async render() {
     if (Auth.user?.role !== 'admin') {
-      router.navigate('#/dashboard');
+      router.navigate('/dashboard');
       return;
     }
     const content = document.getElementById('pageContent');

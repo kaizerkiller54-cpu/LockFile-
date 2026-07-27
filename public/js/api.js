@@ -25,7 +25,9 @@ const API = {
     const res = await fetch(`${this.baseUrl}${endpoint}`, config);
     if (res.status === 401 && !endpoint.startsWith('/auth/')) {
       API.setToken(null);
-      window.location.hash = '#/login';
+      localStorage.removeItem('user');
+      Auth.user = null;
+      window.location.reload();
       throw new Error('Session expirée');
     }
     const data = await res.json();
@@ -109,9 +111,18 @@ const API = {
 
   // Sharing
   shareDocument(id, data) { return this.post(`/sharing/documents/${id}/share`, data); },
-  getSharedWithMe() { return this.get('/sharing/shared-with-me'); },
-  getSharedByMe() { return this.get('/sharing/shared-by-me'); },
   revokeShare(docId, permId) { return this.delete(`/sharing/documents/${docId}/share/${permId}`); },
+  shareFolder(id, data) { return this.post(`/sharing/folders/${id}/share`, data); },
+  revokeFolderShare(folderId, permId) { return this.delete(`/sharing/folders/${folderId}/share/${permId}`); },
+  getSharedWithMe(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this.get(`/sharing/shared-with-me${q ? '?' + q : ''}`);
+  },
+  getSharedByMe(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this.get(`/sharing/shared-by-me${q ? '?' + q : ''}`);
+  },
+  createShareLink(id, data) { return this.post(`/sharing/documents/${id}/link`, data); },
 
   // Users (admin)
   getUsers(params = {}) {
@@ -124,8 +135,32 @@ const API = {
   deleteUser(id) { return this.delete(`/users/${id}`); },
 
   // Scan
-  scanUpload(formData) { return this.upload('/scan/upload', formData); },
+  scanPreview(formData) { return this.upload('/scan/preview', formData); },
+  scanConfirm(data) { return this.post('/scan/confirm', data); },
   scanStatus(jobId) { return this.get(`/scan/status/${jobId}`); },
+
+  // Approvals
+  createApproval(docId, data) { return this.post(`/approvals/documents/${docId}/approve`, data); },
+  approvalDecision(id, data) { return this.post(`/approvals/${id}/decision`, data); },
+  cancelApproval(id) { return this.post(`/approvals/${id}/cancel`); },
+  getPendingApprovals(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this.get(`/approvals/pending${q ? '?' + q : ''}`);
+  },
+  getMyApprovalRequests(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this.get(`/approvals/my-requests${q ? '?' + q : ''}`);
+  },
+
+  // Activity
+  getActivity(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this.get(`/activity${q ? '?' + q : ''}`);
+  },
+  getDocumentActivity(docId, params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this.get(`/activity/document/${docId}${q ? '?' + q : ''}`);
+  },
 
   // Backup (admin)
   createBackup() { return this.post('/backup/export'); },

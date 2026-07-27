@@ -2,6 +2,7 @@ const ProfilePage = {
   async render() {
     const content = document.getElementById('pageContent');
     const u = Auth.user;
+    if (!u) { content.innerHTML = '<div class="empty-state"><p>Veuillez vous reconnecter</p></div>'; return; }
     content.innerHTML = `
       <div class="page-header">
         <div>

@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const { Op } = require('sequelize');
 const { Folder, Document } = require('../models');
 const { auth } = require('../middleware/auth');
 const logger = require('../utils/logger');
@@ -14,13 +15,22 @@ router.get('/', auth, async (req, res) => {
     if (parent === 'null' || !parent) where.parent_id = null;
     else where.parent_id = parent;
 
-    const folders = await Folder.findAll({ where, order: [['nom', 'ASC']] });
+    const [folders, docCounts] = await Promise.all([
+      Folder.findAll({ where, order: [['nom', 'ASC']] }),
+      Document.findAll({
+        attributes: ['dossier_id', [Document.sequelize.fn('COUNT', Document.sequelize.col('id')), 'count']],
+        where: { proprietaire_id: req.user.id, statut: 'actif', dossier_id: { [Op.ne]: null } },
+        group: ['dossier_id'],
+        raw: true
+      })
+    ]);
 
-    const foldersWithCount = await Promise.all(folders.map(async (folder) => {
-      const count = await Document.count({
-        where: { dossier_id: folder.id, proprietaire_id: req.user.id, statut: 'actif' }
-      });
-      return { ...folder.toJSON(), documentCount: count };
+    const countMap = {};
+    docCounts.forEach(r => { countMap[r.dossier_id] = parseInt(r.count); });
+
+    const foldersWithCount = folders.map(f => ({
+      ...f.toJSON(),
+      documentCount: countMap[f.id] || 0
     }));
     res.json({ folders: foldersWithCount });
   } catch (error) {

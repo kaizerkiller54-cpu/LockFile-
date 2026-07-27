@@ -13,6 +13,12 @@ async function init() {
   }
 }
 
+function canProcess(mimeType) {
+  if (!mimeType) return true;
+  const supported = ['image/jpeg', 'image/png', 'image/webp', 'image/tiff', 'image/bmp'];
+  return supported.includes(mimeType);
+}
+
 async function extractText(imagePath, lang = 'fra') {
   if (!isAvailable || !tesseract) {
     return { text: null, error: 'OCR non disponible' };
@@ -21,10 +27,10 @@ async function extractText(imagePath, lang = 'fra') {
     const { data } = await tesseract.recognize(imagePath, lang, {
       logger: m => m.status === 'recognizing text' && logger.debug(`OCR: ${Math.round(m.progress * 100)}%`),
     });
-    return { text: data.text.trim(), confidence: data.confidence, error: null };
+    return { text: data.text.trim(), confidence: data.confidence, error: null, supported: true };
   } catch (error) {
     logger.error('Erreur OCR:', error.message);
-    return { text: null, error: error.message };
+    return { text: null, error: error.message, supported: true };
   }
 }
 
@@ -43,4 +49,4 @@ async function extractTextFromBuffer(buffer, lang = 'fra') {
   }
 }
 
-module.exports = { init, extractText, extractTextFromBuffer, isAvailable: () => isAvailable };
+module.exports = { init, extractText, extractTextFromBuffer, canProcess, isAvailable: () => isAvailable };

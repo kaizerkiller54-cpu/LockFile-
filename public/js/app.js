@@ -14,6 +14,8 @@ const App = {
     document.querySelector('#app > .main-content').style.display = 'block';
     document.querySelector('.auth-page')?.remove();
 
+    router.setContentEl(document.getElementById('pageContent'));
+
     this.updateUI();
     this.initEventListeners();
     this.registerRoutes();
@@ -52,6 +54,8 @@ const App = {
     router.add('/search', () => SearchPage.render());
     router.add('/profile', () => ProfilePage.render());
     router.add('/settings', () => SettingsPage.render());
+    router.add('/approvals', () => ApprovalsPage.render());
+    router.add('/activity', () => ActivityPage.render());
   },
 
   initEventListeners() {
@@ -278,6 +282,7 @@ const App = {
     modal.classList.add('active');
     document.getElementById('uploadProgress').style.display = 'none';
     document.getElementById('uploadForm').reset();
+    document.getElementById('fileInput').value = '';
     document.getElementById('fileInfo').textContent = '';
 
     if (docId) {
@@ -550,20 +555,22 @@ const App = {
     } catch (err) { this.showToast(err.message, 'error'); }
   },
 
-  async shareDocument(id) {
+  async shareDialog(id, type, name) {
+    const isFolder = type === 'folder';
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay active';
     overlay.innerHTML = `
       <div class="modal">
         <div class="modal-header">
-          <h3>Partager le document</h3>
+          <h3>Partager ${isFolder ? 'le dossier' : 'le document'}</h3>
           <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
         </div>
         <div class="modal-body">
           <form id="shareForm">
+            <p class="text-muted" style="margin-bottom:16px">${name}</p>
             <div class="form-group">
-              <label>Email du destinataire (ou laisser vide pour lien public)</label>
-              <input type="email" class="form-control" id="shareEmail" placeholder="email@exemple.com">
+              <label>Nom d'utilisateur ou email du destinataire</label>
+              <input type="text" class="form-control" id="shareRecipient" placeholder="username ou email@exemple.com">
             </div>
             <div class="form-group">
               <label>Permission</label>
@@ -571,10 +578,6 @@ const App = {
                 <option value="lecture">Lecture seule</option>
                 <option value="ecriture">Modification</option>
               </select>
-            </div>
-            <div class="form-group">
-              <label>Expiration du lien</label>
-              <input type="date" class="form-control" id="shareExpiration">
             </div>
             <div class="modal-footer-actions">
               <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Annuler</button>
@@ -588,18 +591,27 @@ const App = {
     document.getElementById('shareForm').onsubmit = async (e) => {
       e.preventDefault();
       try {
-        const data = await API.shareDocument(id, {
-          email: document.getElementById('shareEmail').value || undefined,
-          niveau: document.getElementById('sharePermission').value,
-          expiration: document.getElementById('shareExpiration').value || undefined
-        });
+        const recipient = document.getElementById('shareRecipient').value.trim();
+        const niveau = document.getElementById('sharePermission').value;
+        const payload = { niveau };
+        if (recipient.includes('@')) payload.email = recipient;
+        else payload.username = recipient;
+
+        if (isFolder) await API.shareFolder(id, payload);
+        else await API.shareDocument(id, payload);
         overlay.remove();
-        let msg = 'Document partagé avec succès';
-        if (data.lien) msg += `<br><small>Lien: ${data.lien}</small>`;
-        this.showToast(msg, 'success');
+        App.showToast(`${isFolder ? 'Dossier' : 'Document'} partagé avec succès`, 'success');
       } catch (err) { this.showToast(err.message, 'error'); }
     };
   },
+
+  async shareDocument(id) {
+    try {
+      const data = await API.getDocument(id);
+      this.shareDialog(id, 'document', data.document?.titre || 'Document');
+    } catch { this.shareDialog(id, 'document', 'Document'); }
+  },
+  shareFolder(id, name) { this.shareDialog(id, 'folder', name); },
 
   async downloadDocument(id) {
     window.open(API.getDownloadUrl(id), '_blank');
@@ -620,7 +632,7 @@ const App = {
 
   async globalSearch(q) {
     if (!q || q.length < 2) return;
-    router.navigate('#/search?q=' + encodeURIComponent(q));
+    router.navigate('/search?q=' + encodeURIComponent(q));
   },
 
   async loadNotifPanel() {

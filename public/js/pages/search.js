@@ -66,7 +66,7 @@ const SearchPage = {
     if (!q) return;
     this.query = q;
     this.currentPage = 1;
-    router.navigate(`#/search?q=${encodeURIComponent(q)}`);
+    router.navigate(`/search?q=${encodeURIComponent(q)}`);
   },
 
   async searchDocs() {
@@ -123,7 +123,7 @@ const SearchPage = {
         return;
       }
       container.innerHTML = `<div class="folder-grid">${data.folders.map(f => `
-        <div class="folder-card" onclick="router.navigate('#/documents?dossier=${f.id}')">
+        <div class="folder-card" onclick="router.navigate('/documents?dossier=${f.id}')">
           <i class="fas fa-folder" style="font-size:32px;color:#4f46e5"></i>
           <div class="folder-card-title">${f.nom}</div>
         </div>`).join('')}</div>`;
@@ -145,6 +145,6 @@ const SearchPage = {
 
   goTo(page) {
     this.currentPage = page;
-    router.navigate(`#/search?q=${encodeURIComponent(this.query)}&page=${page}`);
+    router.navigate(`/search?q=${encodeURIComponent(this.query)}&page=${page}`);
   }
 };

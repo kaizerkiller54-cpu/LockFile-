@@ -32,7 +32,7 @@ const Auth = {
   logout() {
     API.setToken(null);
     this.user = null;
-    window.location.hash = '#/login';
+    window.location.hash = '/login';
   },
 
   isAuthenticated() {

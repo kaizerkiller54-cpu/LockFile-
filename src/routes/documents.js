@@ -1,5 +1,5 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
+
 const { Op } = require('sequelize');
 const { body, query, validationResult } = require('express-validator');
 const { Document, Folder, Tag, Version, Notification, Permission, sequelize } = require('../models');
@@ -27,7 +27,8 @@ router.get('/', auth, async (req, res) => {
     if (statut) where.statut = statut;
     if (favori === 'true') where.favori = true;
 
-    const include = [...docIncludes];
+    const include = [];
+    include.push({ model: Folder, as: 'dossier', attributes: ['id', 'nom'] });
     if (tag) {
       include.push({
         model: Tag, as: 'tags',
@@ -36,6 +37,8 @@ router.get('/', auth, async (req, res) => {
         through: { attributes: [] },
         required: true
       });
+    } else {
+      include.push({ model: Tag, as: 'tags', attributes: ['id', 'nom', 'couleur'], through: { attributes: [] } });
     }
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -50,7 +53,7 @@ router.get('/', auth, async (req, res) => {
     res.json({ documents, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
   } catch (error) {
     logger.error('Erreur liste documents:', error);
-    res.status(500).json({ message: 'Erreur serveur', detail: error.message });
+    res.status(500).json({ message: 'Erreur serveur' });
   }
 });
 
@@ -115,6 +118,8 @@ const validateDocInput = [
   body('tags').optional().isArray().withMessage('Tags doit être un tableau'),
   body('favori').optional().isBoolean().withMessage('Favori doit être un booléen'),
   body('commentaire').optional().trim().isLength({ max: 500 }).withMessage('Commentaire trop long'),
+  body('date_expiration').optional({ values: 'falsy' }).isISO8601().withMessage('Date d\'expiration invalide'),
+  body('jours_alerte').optional().isInt({ min: 1, max: 365 }).withMessage('Jours d\'alerte: 1-365'),
 ];
 
 router.post('/', auth, upload.single('fichier'), validateDocInput, async (req, res) => {
@@ -128,6 +133,8 @@ router.post('/', auth, upload.single('fichier'), validateDocInput, async (req, r
     const titre = sanitizeString(req.body.titre) || req.file.originalname.replace(/\.[^/.]+$/, '');
     const description = sanitizeString(req.body.description) || '';
     const tagIds = sanitizeTags(tags);
+    const dateExpiration = req.body.date_expiration || null;
+    const joursAlerte = parseInt(req.body.jours_alerte) || 30;
 
     const docData = {
       titre,
@@ -138,7 +145,9 @@ router.post('/', auth, upload.single('fichier'), validateDocInput, async (req, r
       taille: req.file.size,
       chemin: req.file.path,
       proprietaire_id: req.user.id,
-      dossier_id: dossier || null
+      dossier_id: dossier || null,
+      date_expiration: dateExpiration,
+      jours_alerte: joursAlerte,
     };
 
     const doc = await Document.create(docData);
@@ -197,6 +206,8 @@ router.put('/:id', auth, upload.single('fichier'), validateDocInput, async (req,
     if (req.body.description !== undefined) doc.description = sanitizeString(req.body.description);
     if (req.body.dossier !== undefined) doc.dossier_id = req.body.dossier || null;
     if (req.body.favori !== undefined) doc.favori = req.body.favori === 'true' || req.body.favori === true;
+    if (req.body.date_expiration !== undefined) doc.date_expiration = req.body.date_expiration || null;
+    if (req.body.jours_alerte !== undefined) doc.jours_alerte = parseInt(req.body.jours_alerte) || 30;
 
     if (req.body.tags) {
       const tagIds = sanitizeTags(req.body.tags);
@@ -470,17 +481,9 @@ router.post('/:id/unarchive', auth, async (req, res) => {
   }
 });
 
-router.get('/download/:id', async (req, res) => {
+router.get('/download/:id', auth, async (req, res) => {
   try {
-    let userId = null;
-    const token = req.query.token || req.headers.authorization?.split(' ')[1];
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        userId = decoded.id;
-      } catch {}
-    }
-    if (!userId) return res.status(401).json({ message: 'Authentification requise' });
+    const userId = req.user.id;
 
     const doc = await Document.findOne({
       where: { id: req.params.id }

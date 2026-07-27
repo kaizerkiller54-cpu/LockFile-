@@ -7,6 +7,7 @@ const { auth } = require('../middleware/auth');
 const { getClient, getAuthClient } = require('../config/supabase');
 const logger = require('../utils/logger');
 const { sanitizeString } = require('../utils/sanitize');
+const { passwordPolicy } = require('../middleware/security');
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ const generateToken = (user) => {
 router.post('/register', [
   body('username').trim().isLength({ min: 3, max: 30 }).withMessage('Username: 3-30 caractères'),
   body('email').isEmail().normalizeEmail().withMessage('Email invalide'),
-  body('password').isLength({ min: 6 }).withMessage('Mot de passe: min 6 caractères'),
+  body('password').isLength({ min: 8, max: 128 }).withMessage('Mot de passe: 8-128 caractères'),
   body('nom').trim().notEmpty().isLength({ max: 100 }).withMessage('Nom requis (max 100)'),
   body('prenom').trim().notEmpty().isLength({ max: 100 }).withMessage('Prénom requis (max 100)'),
   body('type').isIn(['particulier', 'organisation']).withMessage('Type invalide'),
@@ -33,6 +34,10 @@ router.post('/register', [
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
+    }
+    const pwErrors = passwordPolicy(req.body.password);
+    if (pwErrors.length) {
+      return res.status(400).json({ errors: pwErrors.map(e => ({ msg: e })) });
     }
     const { email, password, type, nombre_employes } = req.body;
     const username = sanitizeString(req.body.username);
@@ -167,12 +172,16 @@ router.put('/profile', auth, [
 
 router.put('/password', auth, [
   body('currentPassword').notEmpty().withMessage('Mot de passe actuel requis'),
-  body('newPassword').isLength({ min: 6, max: 128 }).withMessage('Nouveau mot de passe: 6-128 caractères'),
+  body('newPassword').isLength({ min: 8, max: 128 }).withMessage('Nouveau mot de passe: 8-128 caractères'),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
+    }
+    const pwErrors = passwordPolicy(req.body.newPassword);
+    if (pwErrors.length) {
+      return res.status(400).json({ errors: pwErrors.map(e => ({ msg: e })) });
     }
     const { currentPassword, newPassword } = req.body;
 

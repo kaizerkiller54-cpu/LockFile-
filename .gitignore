@@ -1,16 +1,17 @@
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Dependencies
 node_modules/
 
 # Uploads
 uploads/
-uploads/*
 
 # Logs
 logs/
-logs/*.log
+*.log
 
 # OS
 .DS_Store
@@ -22,3 +23,16 @@ Thumbs.db
 
 # Railway
 .profile
+
+# Backup archives
+backups/
+
+# SQL dumps (contain data)
+*.sql
+
+# Tesseract training data (large)
+*.traineddata
+
+# Junk directories
+dossier/
+file manager/

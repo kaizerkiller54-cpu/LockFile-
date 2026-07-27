@@ -26,7 +26,9 @@ const TagsPage = {
         container.innerHTML = '<div class="empty-state"><i class="fas fa-tags"></i><h3>Aucune étiquette</h3><p>Créez des étiquettes pour mieux classer vos documents</p></div>';
         return;
       }
-      container.innerHTML = `<div class="doc-grid">${data.tags.map(t => `
+      container.innerHTML = `<div class="doc-grid">${data.tags.map(t => {
+        const safeNom = (t.nom || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        return `
         <div class="doc-card">
           <div class="doc-card-icon" style="background:${t.couleur}15;color:${t.couleur}"><i class="fas fa-tag"></i></div>
           <div class="doc-card-title">${t.nom}</div>
@@ -34,11 +36,11 @@ const TagsPage = {
             <span class="tag" style="background:${t.couleur}22;color:${t.couleur}">${t.nom}</span>
           </div>
           <div class="doc-card-actions" style="opacity:1;position:static;margin-top:12px">
-            <button class="btn btn-sm btn-outline" onclick="TagsPage.editTag('${t.id}','${t.nom}','${t.couleur}')"><i class="fas fa-edit"></i></button>
+            <button class="btn btn-sm btn-outline" onclick="TagsPage.editTag('${t.id}','${safeNom}','${t.couleur}')"><i class="fas fa-edit"></i></button>
             <button class="btn btn-sm btn-danger" onclick="TagsPage.deleteTag('${t.id}')"><i class="fas fa-trash"></i></button>
           </div>
-        </div>
-      `).join('')}</div>`;
+        </div>`;
+      }).join('')}</div>`;
     } catch { document.getElementById('tagsContainer').innerHTML = '<p class="text-center text-muted">Erreur de chargement</p>'; }
   },
 

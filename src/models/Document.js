@@ -72,11 +72,29 @@ const Document = sequelize.define('Document', {
   contenu_ocr: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  date_expiration: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
+  },
+  alerte_expiration: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
+  },
+  jours_alerte: {
+    type: DataTypes.INTEGER,
+    defaultValue: 30
   }
 }, {
   tableName: 'documents',
   timestamps: true,
-  underscored: false
+  underscored: false,
+  indexes: [
+    { fields: ['proprietaire_id'] },
+    { fields: ['dossier_id'] },
+    { fields: ['statut'] },
+    { fields: ['date_expiration'] }
+  ]
 });
 
 module.exports = Document;

@@ -4,8 +4,8 @@ const DocumentsPage = {
   filters: {},
 
   parseUrlParams() {
-    const hash = window.location.hash.slice(1);
-    const params = new URLSearchParams(hash.includes('?') ? hash.split('?')[1] : '');
+    const path = window.location.hash.slice(1);
+    const params = new URLSearchParams(path.includes('?') ? path.split('?')[1] : '');
     if (params.has('dossier')) this.filters.dossier = params.get('dossier');
     else delete this.filters.dossier;
     if (params.has('tag')) this.filters.tag = params.get('tag');
@@ -42,7 +42,7 @@ const DocumentsPage = {
         <button class="btn btn-sm btn-outline" id="filterFav"><i class="fas fa-star"></i> Favoris</button>
         <input type="text" class="form-control" id="filterSearch" placeholder="Rechercher..." style="max-width:200px">
       </div>
-      <div id="documentsContainer"><p class="text-center text-muted" data-i18n="common.loading">Chargement...</p></div>
+      <div id="documentsContainer">${this.currentView === 'grille' ? Skeleton.card(6) : Skeleton.table(6, 8)}</div>
       <div class="pagination" id="docPagination"></div>
     `;
     I18N.apply();
@@ -185,7 +185,7 @@ const DocumentsPage = {
   clearFolderFilter() {
     delete this.filters.dossier;
     this.currentPage = 1;
-    router.navigate('#/documents');
+    router.navigate('/documents');
   },
 
   goTo(page) {
@@ -196,6 +196,6 @@ const DocumentsPage = {
   filterByTag(tagId) {
     this.filters.tag = tagId;
     this.currentPage = 1;
-    router.navigate(`#/documents?tag=${tagId}`);
+    router.navigate(`/documents?tag=${tagId}`);
   }
 };

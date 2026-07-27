@@ -9,7 +9,7 @@ const Permission = sequelize.define('Permission', {
   },
   document_id: {
     type: DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
     references: { model: 'documents', key: 'id' }
   },
   utilisateur_id: {
@@ -38,11 +38,22 @@ const Permission = sequelize.define('Permission', {
   expiration: {
     type: DataTypes.DATE,
     allowNull: true
+  },
+  mot_de_passe: {
+    type: DataTypes.STRING(255),
+    allowNull: true
   }
 }, {
   tableName: 'permissions',
   timestamps: true,
-  underscored: false
+  underscored: false,
+  indexes: [
+    { name: 'idx_perm_document', fields: ['document_id'] },
+    { name: 'idx_perm_dossier', fields: ['dossier_id'] },
+    { name: 'idx_perm_utilisateur', fields: ['utilisateur_id'] },
+    { name: 'idx_perm_accorde_par', fields: ['accorde_par_id'] },
+    { name: 'idx_perm_lien_partage', fields: ['lien_partage'] }
+  ]
 });
 
 module.exports = Permission;

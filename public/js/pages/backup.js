@@ -33,28 +33,29 @@ const BackupPage = {
     try {
       const data = await API.getBackups();
       const list = document.getElementById('backupList');
-      document.getElementById('backupCount').textContent = data.backups.length;
+      const backups = data.backups || [];
+      document.getElementById('backupCount').textContent = backups.length;
 
-      if (!data.backups.length) {
+      if (!backups.length) {
         list.innerHTML = '<div class="empty-state"><i class="fas fa-database"></i><h3>Aucune sauvegarde</h3><p>Créez votre première sauvegarde pour protéger vos données</p></div>';
         document.getElementById('backupLatest').textContent = '-';
         document.getElementById('backupTotalSize').textContent = '-';
         return;
       }
 
-      const latest = data.backups[0];
+      const latest = backups[0];
       document.getElementById('backupLatest').textContent = new Date(latest.date).toLocaleDateString();
-      document.getElementById('backupTotalSize').textContent = App.formatSize(data.backups.reduce((s, b) => s + b.size, 0));
+      document.getElementById('backupTotalSize').textContent = App.formatSize(backups.reduce((s, b) => s + b.size, 0));
 
       list.innerHTML = `<div class="table-container"><table class="data-table">
         <thead><tr><th>Nom</th><th>Taille</th><th>Date</th><th>Actions</th></tr></thead>
-        <tbody>${data.backups.map(b => `
+        <tbody>${backups.map(b => `
           <tr>
             <td><i class="fas fa-archive" style="color:#6366f1;margin-right:8px"></i>${b.name}</td>
             <td>${App.formatSize(b.size)}</td>
             <td>${new Date(b.date).toLocaleString()}</td>
             <td>
-              <button class="btn btn-sm btn-outline" onclick="BackupPage.restoreBackup('${b.name}')"><i class="fas fa-undo"></i> Restaurer</button>
+              <button class="btn btn-sm btn-outline" onclick="BackupPage.restoreBackup('${b.name}', event)"><i class="fas fa-undo"></i> Restaurer</button>
               <button class="btn btn-sm btn-danger" onclick="BackupPage.deleteBackup('${b.name}')"><i class="fas fa-trash"></i></button>
             </td>
           </tr>`).join('')}</tbody></table></div>`;
@@ -74,9 +75,9 @@ const BackupPage = {
     btn.innerHTML = '<i class="fas fa-save"></i> Créer une sauvegarde';
   },
 
-  async restoreBackup(name) {
+  async restoreBackup(name, e) {
     if (!confirm(`Restaurer la sauvegarde "${name}" ? Cela remplacera les fichiers actuels.`)) return;
-    const btn = event.target;
+    const btn = e?.target || document.querySelector(`[onclick*="${name}"]`);
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>...';
     try {

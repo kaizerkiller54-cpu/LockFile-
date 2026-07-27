@@ -15,8 +15,9 @@ const Notification = sequelize.define('Notification', {
   type: {
     type: DataTypes.ENUM(
       'document_ajoute', 'document_modifie', 'document_supprime',
+      'document_expiré', 'document_approuve', 'document_refuse',
       'partage_recu', 'partage_expire', 'version_ajoutee',
-      'commentaire', 'systeme'
+      'commentaire', 'systeme', 'approbation_demandee'
     ),
     allowNull: false
   },

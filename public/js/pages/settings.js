@@ -1,6 +1,7 @@
 const SettingsPage = {
   async render() {
     const u = Auth.user;
+    if (!u) { document.getElementById('pageContent').innerHTML = '<div class="empty-state"><p>Veuillez vous reconnecter</p></div>'; return; }
     const content = document.getElementById('pageContent');
     content.innerHTML = `
       <div class="page-header">

@@ -7,6 +7,8 @@ const Tag = require('./Tag');
 const Permission = require('./Permission');
 const Version = require('./Version');
 const Notification = require('./Notification');
+const Approval = require('./Approval');
+const ActivityLog = require('./ActivityLog');
 
 // Document -> Folder (N:1)
 Document.belongsTo(Folder, { foreignKey: 'dossier_id', as: 'dossier' });
@@ -41,6 +43,10 @@ Tag.belongsToMany(Document, { through: DocumentTag, foreignKey: 'tag_id', otherK
 Permission.belongsTo(Document, { foreignKey: 'document_id', as: 'document' });
 Document.hasMany(Permission, { foreignKey: 'document_id', as: 'permissions' });
 
+// Permission -> Folder (N:1)
+Permission.belongsTo(Folder, { foreignKey: 'dossier_id', as: 'dossier' });
+Folder.hasMany(Permission, { foreignKey: 'dossier_id', as: 'permissions' });
+
 // Permission -> User (grantee)
 Permission.belongsTo(User, { foreignKey: 'utilisateur_id', as: 'utilisateur' });
 
@@ -58,6 +64,23 @@ Version.belongsTo(User, { foreignKey: 'modifie_par_id', as: 'modifie_par' });
 Notification.belongsTo(User, { foreignKey: 'destinataire_id', as: 'destinataire' });
 User.hasMany(Notification, { foreignKey: 'destinataire_id', as: 'notifications' });
 
+// Approval -> Document (N:1)
+Approval.belongsTo(Document, { foreignKey: 'document_id', as: 'document' });
+Document.hasMany(Approval, { foreignKey: 'document_id', as: 'approbations' });
+
+// Approval -> User (demandeur)
+Approval.belongsTo(User, { foreignKey: 'demandeur_id', as: 'demandeur' });
+User.hasMany(Approval, { foreignKey: 'demandeur_id', as: 'approbations_demandeur' });
+
+// Approval -> User (approbateur)
+Approval.belongsTo(User, { foreignKey: 'approbateur_id', as: 'approbateur' });
+User.hasMany(Approval, { foreignKey: 'approbateur_id', as: 'approbations_approbateur' });
+
+// ActivityLog -> User
+ActivityLog.belongsTo(User, { foreignKey: 'utilisateur_id', as: 'utilisateur' });
+User.hasMany(ActivityLog, { foreignKey: 'utilisateur_id', as: 'activites' });
+
 module.exports = {
-  User, Document, Folder, Tag, Permission, Version, Notification, DocumentTag, sequelize
+  User, Document, Folder, Tag, Permission, Version, Notification, DocumentTag,
+  Approval, ActivityLog, sequelize
 };
