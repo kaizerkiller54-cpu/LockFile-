@@ -93,17 +93,24 @@ const SearchPage = {
       }
 
       container.innerHTML = `<div class="table-container"><table class="data-table">
-        <thead><tr><th>Nom</th><th>Type</th><th>Taille</th><th>Date</th><th>Dossier</th><th>Tags</th></tr></thead>
+        <thead><tr><th>Nom</th><th>Type</th><th>Taille</th><th>Date</th><th>Dossier</th><th>Tags</th><th>Actions</th></tr></thead>
         <tbody>${data.documents.map(d => {
-          const [icon, color] = DocumentsPage ? DocumentsPage.getFileIcon(d.type_fichier) : ['fa-file-alt', '#6b7280'];
+          const [icon, color] = (typeof DocumentsPage !== 'undefined' && DocumentsPage.getFileIcon) ? DocumentsPage.getFileIcon(d.type_fichier) : ['fa-file-alt', '#6b7280'];
           const tags = d.tags?.map(t => `<span class="tag" style="background:${t.couleur}22;color:${t.couleur};font-size:11px">${t.nom}</span>`).join('') || '';
+          const titleHighlighted = App.highlightMatch ? App.highlightMatch(d.titre, this.query) : d.titre;
+          const cleanTitle = (d.titre || '').replace(/'/g, "\\'");
           return `<tr onclick="App.previewDocument('${d.id}')" style="cursor:pointer">
-            <td><i class="fas ${icon}" style="color:${color};margin-right:8px"></i>${d.titre}</td>
+            <td><i class="fas ${icon}" style="color:${color};margin-right:8px"></i><strong>${titleHighlighted}</strong></td>
             <td>${d.type_fichier?.split('/')[1] || '-'}</td>
             <td>${App.formatSize(d.taille)}</td>
             <td>${new Date(d.createdAt).toLocaleDateString()}</td>
             <td>${d.dossier?.nom || '-'}</td>
             <td>${tags || '-'}</td>
+            <td><span class="doc-card-actions" style="position:static;opacity:1">
+              <i class="fas fa-eye btn-icon-sm text-primary" onclick="event.stopPropagation();App.openDocument('${d.id}','${d.type_fichier}','${cleanTitle}')" title="Visualiser"></i>
+              <i class="fas fa-download btn-icon-sm" onclick="event.stopPropagation();App.downloadDocument('${d.id}')" title="Télécharger"></i>
+              <i class="fas fa-trash btn-icon-sm text-danger" onclick="event.stopPropagation();App.confirmDelete('${d.id}')" title="Supprimer"></i>
+            </span></td>
           </tr>`;
         }).join('')}</tbody></table></div>`;
 
@@ -122,11 +129,14 @@ const SearchPage = {
         container.innerHTML = '<div class="empty-state"><i class="fas fa-folder"></i><h3>Aucun dossier</h3></div>';
         return;
       }
-      container.innerHTML = `<div class="folder-grid">${data.folders.map(f => `
+      container.innerHTML = `<div class="folder-grid">${data.folders.map(f => {
+        const folderNameHighlighted = App.highlightMatch ? App.highlightMatch(f.nom, this.query) : f.nom;
+        return `
         <div class="folder-card" onclick="router.navigate('/documents?dossier=${f.id}')">
           <i class="fas fa-folder" style="font-size:32px;color:#4f46e5"></i>
-          <div class="folder-card-title">${f.nom}</div>
-        </div>`).join('')}</div>`;
+          <div class="folder-card-title">${folderNameHighlighted}</div>
+        </div>`;
+      }).join('')}</div>`;
     } catch {
       container.innerHTML = '<p class="text-center text-muted">Erreur</p>';
     }

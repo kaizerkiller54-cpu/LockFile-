@@ -13,7 +13,7 @@ const ocrService = require('./src/services/ocrService');
 const imageProcessor = require('./src/services/imageProcessor');
 const searchService = require('./src/services/searchService');
 const logger = require('./src/utils/logger');
-const { requestId, securityHeaders, sanitizeError } = require('./src/middleware/security');
+const { requestId, securityHeaders, sanitizeError, sanitizeInput } = require('./src/middleware/security');
 const { auth } = require('./src/middleware/auth');
 const fs = require('fs');
 
@@ -37,6 +37,7 @@ process.on('uncaughtException', (err) => {
 });
 
 app.use(requestId);
+app.use(sanitizeInput);
 app.use(compression({ filter: (req, res) => {
   if (req.headers['x-no-compression']) return false;
   return compression.filter(req, res);

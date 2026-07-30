@@ -139,6 +139,7 @@ const DocumentsPage = {
           ${tags ? `<div class="doc-card-tags">${tags}</div>` : ''}
         </div>
         <div class="doc-card-actions" style="opacity:1;position:static;margin-top:8px;display:flex;gap:4px">
+          <i class="fas fa-eye btn-icon-sm text-primary" onclick="event.stopPropagation();App.openDocument('${d.id}','${d.type_fichier}','${d.titre.replace(/'/g, "\\'")}')" title="Visualiser le document"></i>
           <i class="fas fa-download btn-icon-sm" onclick="event.stopPropagation();App.downloadDocument('${d.id}')" title="Télécharger"></i>
           <i class="fas fa-archive btn-icon-sm text-muted" onclick="event.stopPropagation();App.archiveDocument('${d.id}')" title="Archiver"></i>
           <i class="fas fa-trash btn-icon-sm text-danger" onclick="event.stopPropagation();App.confirmDelete('${d.id}')" title="Supprimer"></i>
@@ -162,7 +163,12 @@ const DocumentsPage = {
           <td>${new Date(d.createdAt).toLocaleDateString()}</td>
           <td>${d.dossier?.nom || '-'}</td>
           <td>${tags || '<span class="text-muted" style="font-size:11px">—</span>'}</td>
-          <td><span class="doc-card-actions" style="position:static;opacity:1"><i class="fas fa-download btn-icon-sm" onclick="event.stopPropagation();App.downloadDocument('${d.id}')"></i><i class="fas fa-archive btn-icon-sm text-muted" onclick="event.stopPropagation();App.archiveDocument('${d.id}')" title="Archiver"></i><i class="fas fa-trash btn-icon-sm text-danger" onclick="event.stopPropagation();App.confirmDelete('${d.id}')"></i></span></td>
+          <td><span class="doc-card-actions" style="position:static;opacity:1">
+            <i class="fas fa-eye btn-icon-sm text-primary" onclick="event.stopPropagation();App.openDocument('${d.id}','${d.type_fichier}','${d.titre.replace(/'/g, "\\'")}')" title="Visualiser le document"></i>
+            <i class="fas fa-download btn-icon-sm" onclick="event.stopPropagation();App.downloadDocument('${d.id}')" title="Télécharger"></i>
+            <i class="fas fa-archive btn-icon-sm text-muted" onclick="event.stopPropagation();App.archiveDocument('${d.id}')" title="Archiver"></i>
+            <i class="fas fa-trash btn-icon-sm text-danger" onclick="event.stopPropagation();App.confirmDelete('${d.id}')" title="Supprimer"></i>
+          </span></td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
   },

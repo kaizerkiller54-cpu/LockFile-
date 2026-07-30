@@ -9,3 +9,7 @@
 2026-07-24 19:07:35.592 [ERROR] Erreur suppression Supabase:
 2026-07-24 19:07:40.133 [ERROR] Erreur suppression Supabase:
 2026-07-26 12:09:37.813 [ERROR] Erreur création Supabase Auth: fetch failed {"__isAuthError":true,"name":"AuthRetryableFetchError","status":0,"stack":"AuthRetryableFetchError: fetch failed\n    at _handleRequest (C:\\Users\\DELL\\Documents\\LockFile\\node_modules\\@supabase\\auth-js\\dist\\main\\lib\\fetch.js:124:15)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async _request (C:\\Users\\DELL\\Documents\\LockFile\\node_modules\\@supabase\\auth-js\\dist\\main\\lib\\fetch.js:109:18)\n    at async GoTrueAdminApi.createUser (C:\\Users\\DELL\\Documents\\LockFile\\node_modules\\@supabase\\auth-js\\dist\\main\\GoTrueAdminApi.js:392:20)\n    at async C:\\Users\\DELL\\Documents\\LockFile\\src\\routes\\auth.js:54:46"}
+2026-07-30 10:51:53.815 [ERROR] Erreur upload Supabase:
+2026-07-30 10:52:52.307 [ERROR] Erreur upload archivé:
+2026-07-30 15:10:44.125 [ERROR] Erreur suppression Supabase:
+2026-07-30 16:05:28.827 [ERROR] Erreur upload version Supabase:

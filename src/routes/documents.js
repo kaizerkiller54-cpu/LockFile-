@@ -9,10 +9,25 @@ const logger = require('../utils/logger');
 const { encryptFile, decryptFile, decompressBuffer } = require('../utils/crypto');
 const { sanitizeString, sanitizeOptional, sanitizeTags } = require('../utils/sanitize');
 const storage = require('../utils/storage');
+const { logActivity } = require('../middleware/activityLogger');
 const fs = require('fs');
 const path = require('path');
 
 const router = express.Router();
+
+// Check if user can access document (owner or has ecriture permission)
+async function canModifyDoc(docId, userId, include) {
+  let doc = await Document.findOne({
+    where: { id: docId, proprietaire_id: userId },
+    include
+  });
+  if (doc) return doc;
+  const perm = await Permission.findOne({
+    where: { document_id: docId, utilisateur_id: userId, niveau: 'ecriture' }
+  });
+  if (perm) return await Document.findByPk(docId, { include });
+  return null;
+}
 
 const docIncludes = [
   { model: Folder, as: 'dossier', attributes: ['id', 'nom'] },
@@ -22,10 +37,23 @@ const docIncludes = [
 router.get('/', auth, async (req, res) => {
   try {
     const { dossier, statut, favori, tag, page = 1, limit = 20 } = req.query;
-    const where = { proprietaire_id: req.user.id, statut: 'actif' };
+
+    const where = { statut: statut || 'actif' };
     if (dossier !== undefined) where.dossier_id = dossier === 'null' ? null : dossier;
-    if (statut) where.statut = statut;
-    if (favori === 'true') where.favori = true;
+    if (favori === 'true') {
+      where.proprietaire_id = req.user.id;
+      where.favori = true;
+    } else {
+      const sharedIds = (await Permission.findAll({
+        attributes: ['document_id'],
+        where: { utilisateur_id: req.user.id, document_id: { [Op.ne]: null } },
+        raw: true
+      })).map(p => p.document_id).filter(Boolean);
+      where[Op.or] = [
+        { proprietaire_id: req.user.id },
+        { id: sharedIds }
+      ];
+    }
 
     const include = [];
     include.push({ model: Folder, as: 'dossier', attributes: ['id', 'nom'] });
@@ -59,8 +87,21 @@ router.get('/', auth, async (req, res) => {
 
 router.get('/recent', auth, async (req, res) => {
   try {
+    const sharedIds = await Permission.findAll({
+      attributes: ['document_id'],
+      where: { utilisateur_id: req.user.id, document_id: { [Op.ne]: null } },
+      raw: true
+    });
+    const sharedDocIds = sharedIds.map(p => p.document_id).filter(Boolean);
+
     const documents = await Document.findAll({
-      where: { proprietaire_id: req.user.id, statut: 'actif' },
+      where: {
+        statut: 'actif',
+        [Op.or]: [
+          { proprietaire_id: req.user.id },
+          { id: sharedDocIds }
+        ]
+      },
       include: docIncludes,
       order: [['createdAt', 'DESC']],
       limit: 10
@@ -76,15 +117,28 @@ router.get('/stats', auth, async (req, res) => {
   try {
     const userId = req.user.id;
     const weekAgo = new Date(Date.now() - 7 * 86400000);
+    const sharedIds = (await Permission.findAll({
+      attributes: ['document_id'],
+      where: { utilisateur_id: userId, document_id: { [Op.ne]: null } },
+      raw: true
+    })).map(p => p.document_id).filter(Boolean);
+
+    const accessFilter = {
+      [Op.or]: [
+        { proprietaire_id: userId },
+        { id: sharedIds }
+      ]
+    };
+    const ownerFilter = { proprietaire_id: userId };
 
     const [total, recents, favoris, partages, parType] = await Promise.all([
-      Document.count({ where: { proprietaire_id: userId, statut: 'actif' } }),
-      Document.count({ where: { proprietaire_id: userId, statut: 'actif', createdAt: { [Op.gte]: weekAgo } } }),
-      Document.count({ where: { proprietaire_id: userId, favori: true, statut: 'actif' } }),
-      Document.count({ where: { proprietaire_id: userId, est_partage: true, statut: 'actif' } }),
+      Document.count({ where: { ...accessFilter, statut: 'actif' } }),
+      Document.count({ where: { ...accessFilter, statut: 'actif', createdAt: { [Op.gte]: weekAgo } } }),
+      Document.count({ where: { ...ownerFilter, favori: true, statut: 'actif' } }),
+      Document.count({ where: { ...ownerFilter, est_partage: true, statut: 'actif' } }),
       Document.findAll({
         attributes: ['type_fichier', [sequelize.fn('COUNT', sequelize.col('id')), 'count']],
-        where: { proprietaire_id: userId, statut: 'actif' },
+        where: { ...accessFilter, statut: 'actif' },
         group: ['type_fichier'],
         raw: true
       })
@@ -99,10 +153,7 @@ router.get('/stats', auth, async (req, res) => {
 
 router.get('/:id', auth, async (req, res) => {
   try {
-    const doc = await Document.findOne({
-      where: { id: req.params.id, proprietaire_id: req.user.id },
-      include: docIncludes
-    });
+    const doc = await canModifyDoc(req.params.id, req.user.id, docIncludes);
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
     res.json({ document: doc });
   } catch (error) {
@@ -185,6 +236,16 @@ router.post('/', auth, upload.single('fichier'), validateDocInput, async (req, r
 
     logger.info(`Document créé: ${doc.titre} par ${req.user.username}`);
     const reloaded = await Document.findByPk(doc.id, { include: docIncludes });
+    
+    logActivity({
+      userId: req.user.id,
+      action: 'document_cree',
+      cibleType: 'document',
+      cibleId: doc.id,
+      description: `Document "${doc.titre}" créé`,
+      req
+    });
+    
     res.status(201).json({ document: reloaded });
   } catch (error) {
     logger.error('Erreur upload:', error);
@@ -197,9 +258,7 @@ router.put('/:id', auth, upload.single('fichier'), validateDocInput, async (req,
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const doc = await Document.findOne({
-      where: { id: req.params.id, proprietaire_id: req.user.id }
-    });
+    const doc = await canModifyDoc(req.params.id, req.user.id);
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
 
     if (req.body.titre !== undefined) doc.titre = sanitizeString(req.body.titre);
@@ -250,6 +309,15 @@ router.put('/:id', auth, upload.single('fichier'), validateDocInput, async (req,
       lien: `/documents/${doc.id}`
     });
 
+    logActivity({
+      userId: req.user.id,
+      action: 'document_modifie',
+      cibleType: 'document',
+      cibleId: doc.id,
+      description: `Document "${doc.titre}" modifié${req.file ? ' (nouvelle version)' : ''}`,
+      req
+    });
+
     const reloaded = await Document.findByPk(doc.id, { include: docIncludes });
     res.json({ document: reloaded });
   } catch (error) {
@@ -265,9 +333,7 @@ router.patch('/:id/tags', auth, [
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const doc = await Document.findOne({
-      where: { id: req.params.id, proprietaire_id: req.user.id }
-    });
+    const doc = await canModifyDoc(req.params.id, req.user.id);
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
 
     const tagIds = sanitizeTags(req.body.tags);
@@ -312,6 +378,15 @@ router.delete('/:id', auth, async (req, res) => {
       lien: '#/trash'
     });
 
+    logActivity({
+      userId: userId,
+      action: 'document_supprime',
+      cibleType: 'document',
+      cibleId: docId,
+      description: `Document "${docTitre}" supprimé`,
+      req
+    });
+
     logger.info(`Document supprimé: ${docTitre} par ${username}`);
     res.json({ message: 'Document supprimé' });
   } catch (error) {
@@ -332,6 +407,16 @@ router.post('/:id/restore', auth, async (req, res) => {
       { bind: ['actif', doc.id] }
     );
     doc.statut = 'actif';
+    
+    logActivity({
+      userId: req.user.id,
+      action: 'document_restauré',
+      cibleType: 'document',
+      cibleId: doc.id,
+      description: `Document "${doc.titre}" restauré de la corbeille`,
+      req
+    });
+    
     res.json({ document: doc });
   } catch (error) {
     logger.error('Erreur restore:', error);
@@ -352,6 +437,15 @@ router.delete('/:id/permanent', auth, async (req, res) => {
     await Permission.destroy({ where: { document_id: doc.id } });
     await Notification.destroy({ where: { lien: `/documents/${doc.id}` } });
     await Document.destroy({ where: { id: doc.id } });
+
+    logActivity({
+      userId: req.user.id,
+      action: 'document_supprime_definitivement',
+      cibleType: 'document',
+      cibleId: doc.id,
+      description: `Document "${doc.titre}" supprimé définitivement`,
+      req
+    });
 
     logger.info(`Suppression définitive: ${doc.titre} par ${req.user.username}`);
     res.json({ message: 'Document supprimé définitivement' });
@@ -375,6 +469,15 @@ router.delete('/trash/empty', auth, async (req, res) => {
       await Document.destroy({ where: { id: doc.id } });
     }
 
+    logActivity({
+      userId: req.user.id,
+      action: 'corbeille_vidée',
+      cibleType: 'corbeille',
+      cibleId: null,
+      description: `Corbeille vidée (${docs.length} document(s) supprimé(s))`,
+      req
+    });
+
     logger.info(`Corbeille vidée par ${req.user.username} (${docs.length} doc(s))`);
     res.json({ message: `Corbeille vidée (${docs.length} document(s) supprimé(s))` });
   } catch (error) {
@@ -385,9 +488,7 @@ router.delete('/trash/empty', auth, async (req, res) => {
 
 router.get('/:id/versions', auth, async (req, res) => {
   try {
-    const doc = await Document.findOne({
-      where: { id: req.params.id, proprietaire_id: req.user.id }
-    });
+    const doc = await canModifyDoc(req.params.id, req.user.id);
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
 
     const versions = await Version.findAll({
@@ -404,9 +505,7 @@ router.get('/:id/versions', auth, async (req, res) => {
 
 router.post('/:id/restore-version/:versionId', auth, async (req, res) => {
   try {
-    const doc = await Document.findOne({
-      where: { id: req.params.id, proprietaire_id: req.user.id }
-    });
+    const doc = await canModifyDoc(req.params.id, req.user.id);
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
 
     const version = await Version.findOne({
@@ -436,6 +535,15 @@ router.post('/:id/restore-version/:versionId', auth, async (req, res) => {
 
     try { encryptFile(doc.chemin); } catch (e) { logger.error('Erreur chiffrement restauration:', e); }
 
+    logActivity({
+      userId: req.user.id,
+      action: 'version_restaurée',
+      cibleType: 'version',
+      cibleId: version.id,
+      description: `Version ${version.numero_version} restaurée pour "${doc.titre}"`,
+      req
+    });
+
     res.json({ document: doc, message: `Version ${version.numero_version} restaurée` });
   } catch (error) {
     logger.error('Erreur restore version:', error);
@@ -459,6 +567,16 @@ router.post('/:id/archive', auth, async (req, res) => {
 
     doc.statut = 'archive';
     await doc.save();
+    
+    logActivity({
+      userId: req.user.id,
+      action: 'document_archivé',
+      cibleType: 'document',
+      cibleId: doc.id,
+      description: `Document "${doc.titre}" archivé`,
+      req
+    });
+    
     logger.info(`Document archivé: ${doc.titre}`);
     res.json({ message: 'Document archivé', document: doc });
   } catch (error) {
@@ -473,6 +591,16 @@ router.post('/:id/unarchive', auth, async (req, res) => {
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
     doc.statut = 'actif';
     await doc.save();
+    
+    logActivity({
+      userId: req.user.id,
+      action: 'document_désarchivé',
+      cibleType: 'document',
+      cibleId: doc.id,
+      description: `Document "${doc.titre}" désarchivé`,
+      req
+    });
+    
     logger.info(`Document désarchivé: ${doc.titre}`);
     res.json({ message: 'Document désarchivé', document: doc });
   } catch (error) {
@@ -495,6 +623,15 @@ router.get('/download/:id', auth, async (req, res) => {
       where: { document_id: doc.id, utilisateur_id: userId }
     });
     if (!isOwner && !perm) return res.status(403).json({ message: 'Accès non autorisé' });
+
+    logActivity({
+      userId: userId,
+      action: 'document_telecharge',
+      cibleType: 'document',
+      cibleId: doc.id,
+      description: `Document "${doc.titre}" téléchargé`,
+      req
+    });
 
     if (doc.firebase_path) {
       try {

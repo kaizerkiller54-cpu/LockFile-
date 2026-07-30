@@ -22,20 +22,57 @@ const API = {
     if (config.body instanceof FormData) {
       delete config.headers['Content-Type'];
     }
-    const res = await fetch(`${this.baseUrl}${endpoint}`, config);
-    if (res.status === 401 && !endpoint.startsWith('/auth/')) {
-      API.setToken(null);
-      localStorage.removeItem('user');
-      Auth.user = null;
-      window.location.reload();
-      throw new Error('Session expirée');
+    
+    // Add timeout
+    const timeout = options.timeout || 30000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    config.signal = controller.signal;
+    
+    try {
+      const res = await fetch(`${this.baseUrl}${endpoint}`, config);
+      clearTimeout(timeoutId);
+      
+      if (res.status === 401 && !endpoint.startsWith('/auth/')) {
+        API.setToken(null);
+        localStorage.removeItem('user');
+        Auth.user = null;
+        window.location.reload();
+        throw new Error('Session expirée');
+      }
+      
+      if (res.status === 403) {
+        throw new Error('Accès non autorisé');
+      }
+      
+      if (res.status === 429) {
+        throw new Error('Trop de requêtes, veuillez réessayer plus tard');
+      }
+      
+      if (res.status === 413) {
+        throw new Error('Fichier trop volumineux');
+      }
+      
+      if (res.status === 415) {
+        throw new Error('Type de fichier non supporté');
+      }
+      
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = data.message || (data.errors && data.errors.map(e => e.msg || e.message).join(', ')) || 'Erreur serveur';
+        throw new Error(msg);
+      }
+      return data;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Délai d\'attente dépassé. Vérifiez votre connexion.');
+      }
+      if (error.message === 'Failed to fetch') {
+        throw new Error('Impossible de contacter le serveur. Vérifiez votre connexion internet.');
+      }
+      throw error;
     }
-    const data = await res.json();
-    if (!res.ok) {
-      const msg = data.message || (data.errors && data.errors.map(e => e.msg || e.message).join(', ')) || 'Erreur serveur';
-      throw new Error(msg);
-    }
-    return data;
   },
 
   get(endpoint) { return this.request(endpoint); },
@@ -98,6 +135,9 @@ const API = {
   search(params) {
     const q = new URLSearchParams(params).toString();
     return this.get(`/search?${q}`);
+  },
+  searchSuggestions(query) {
+    return this.get(`/search/suggestions?q=${encodeURIComponent(query)}`);
   },
 
   // Notifications

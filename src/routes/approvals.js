@@ -7,8 +7,16 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
+// Only organizations can use approvals
+const requireOrg = (req, res, next) => {
+  if (req.user.type !== 'organisation') {
+    return res.status(403).json({ message: 'Approbations réservées aux organisations' });
+  }
+  next();
+};
+
 // Create approval request
-router.post('/documents/:id/approve', auth, [
+router.post('/documents/:id/approve', auth, requireOrg, [
   body('approbateur_id').isInt().withMessage('Approbateur requis'),
   body('priorite').optional().isIn(['normale', 'haute', 'urgente']).withMessage('Priorité invalide'),
   body('commentaire').optional().trim().isLength({ max: 2000 }),
@@ -66,7 +74,7 @@ router.post('/documents/:id/approve', auth, [
 });
 
 // Decision (approve/reject)
-router.post('/:id/decision', auth, [
+router.post('/:id/decision', auth, requireOrg, [
   body('decision').isIn(['approuve', 'refuse']).withMessage('Décision: approuve ou refuse'),
   body('commentaire').optional().trim().isLength({ max: 2000 }),
 ], async (req, res) => {
@@ -110,7 +118,7 @@ router.post('/:id/decision', auth, [
 });
 
 // Cancel approval request (by requester)
-router.post('/:id/cancel', auth, async (req, res) => {
+router.post('/:id/cancel', auth, requireOrg, async (req, res) => {
   try {
     const approval = await Approval.findOne({
       where: { id: req.params.id, demandeur_id: req.user.id, statut: 'en_attente' }
@@ -127,7 +135,7 @@ router.post('/:id/cancel', auth, async (req, res) => {
 });
 
 // List pending approvals (for current user as approbateur)
-router.get('/pending', auth, async (req, res) => {
+router.get('/pending', auth, requireOrg, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -164,7 +172,7 @@ router.get('/pending', auth, async (req, res) => {
 });
 
 // List my requests (for current user as demandeur)
-router.get('/my-requests', auth, async (req, res) => {
+router.get('/my-requests', auth, requireOrg, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);

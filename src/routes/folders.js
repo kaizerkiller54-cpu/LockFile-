@@ -5,6 +5,7 @@ const { Folder, Document } = require('../models');
 const { auth } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const { sanitizeString, sanitizeOptional } = require('../utils/sanitize');
+const { logActivity } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
@@ -84,6 +85,16 @@ router.post('/', auth, folderFields, async (req, res) => {
       icone,
       proprietaire_id: req.user.id
     });
+    
+    logActivity({
+      userId: req.user.id,
+      action: 'dossier_cree',
+      cibleType: 'dossier',
+      cibleId: folder.id,
+      description: `Dossier "${folder.nom}" créé`,
+      req
+    });
+    
     logger.info(`Dossier créé: ${folder.nom} par ${req.user.username}`);
     res.status(201).json({ folder });
   } catch (error) {
@@ -109,6 +120,16 @@ router.put('/:id', auth, folderFields, async (req, res) => {
     if (req.body.parent !== undefined) folder.parent_id = req.body.parent || null;
 
     await folder.save();
+    
+    logActivity({
+      userId: req.user.id,
+      action: 'dossier_modifié',
+      cibleType: 'dossier',
+      cibleId: folder.id,
+      description: `Dossier "${folder.nom}" modifié`,
+      req
+    });
+    
     res.json({ folder });
   } catch (error) {
     logger.error('Erreur update folder:', error);
@@ -129,6 +150,15 @@ router.delete('/:id', auth, async (req, res) => {
       { where: { parent_id: folder.id } }
     );
     await folder.destroy();
+
+    logActivity({
+      userId: req.user.id,
+      action: 'dossier_supprimé',
+      cibleType: 'dossier',
+      cibleId: folder.id,
+      description: `Dossier "${folder.nom}" supprimé`,
+      req
+    });
 
     logger.info(`Dossier supprimé: ${folder.nom} par ${req.user.username}`);
     res.json({ message: 'Dossier supprimé' });

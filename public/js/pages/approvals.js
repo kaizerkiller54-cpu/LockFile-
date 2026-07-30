@@ -2,6 +2,10 @@ const ApprovalsPage = {
   currentTab: 'pending',
 
   async render() {
+    if (Auth.user?.type !== 'organisation') {
+      router.navigate('/dashboard');
+      return;
+    }
     this.page = 1;
     const content = document.getElementById('pageContent');
     content.innerHTML = `

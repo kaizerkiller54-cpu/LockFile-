@@ -8,6 +8,7 @@ const { getClient, getAuthClient } = require('../config/supabase');
 const logger = require('../utils/logger');
 const { sanitizeString } = require('../utils/sanitize');
 const { passwordPolicy } = require('../middleware/security');
+const { logActivity } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
@@ -68,6 +69,16 @@ router.post('/register', [
       nombre_employes: type === 'organisation' ? nombre_employes : null
     });
     const token = generateToken(user);
+    
+    logActivity({
+      userId: user.id,
+      action: 'inscription',
+      cibleType: 'user',
+      cibleId: user.id,
+      description: `Nouvel utilisateur créé: ${username}`,
+      req
+    });
+    
     logger.info(`Nouvel utilisateur créé: ${username} (Supabase Auth)`);
     res.status(201).json({ token, user: user.toJSON() });
   } catch (error) {
@@ -124,6 +135,16 @@ router.post('/login', [
     user.derniere_connexion = new Date();
     await user.save();
     const token = generateToken(user);
+    
+    logActivity({
+      userId: user.id,
+      action: 'connexion',
+      cibleType: 'user',
+      cibleId: user.id,
+      description: `Connexion réussie: ${user.username}`,
+      req
+    });
+    
     logger.info(`Connexion: ${user.username}`);
     res.json({ token, user: user.toJSON() });
   } catch (error) {

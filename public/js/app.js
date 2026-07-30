@@ -14,6 +14,11 @@ const App = {
     document.querySelector('#app > .main-content').style.display = 'block';
     document.querySelector('.auth-page')?.remove();
 
+    const navApprovals = document.getElementById('navApprovals');
+    if (navApprovals) {
+      navApprovals.style.display = Auth.user?.type === 'organisation' ? 'flex' : 'none';
+    }
+
     router.setContentEl(document.getElementById('pageContent'));
 
     this.updateUI();
@@ -133,10 +138,51 @@ const App = {
     };
 
     let searchTimeout;
-    document.getElementById('globalSearch').oninput = (e) => {
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => this.globalSearch(e.target.value), 300);
-    };
+    const searchInput = document.getElementById('globalSearch');
+    if (searchInput) {
+      searchInput.oninput = (e) => {
+        clearTimeout(searchTimeout);
+        const val = e.target.value;
+        if (!val.trim()) {
+          this.closeSearchDropdown();
+          return;
+        }
+        searchTimeout = setTimeout(() => this.showLiveSearchSuggestions(val), 300);
+      };
+      searchInput.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.closeSearchDropdown();
+          this.globalSearch(searchInput.value);
+        } else if (e.key === 'Escape') {
+          this.closeSearchDropdown();
+        }
+      };
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.search-bar')) {
+          this.closeSearchDropdown();
+        }
+      });
+    }
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'k') {
+          e.preventDefault();
+          const searchInput = document.getElementById('globalSearch');
+          if (searchInput) searchInput.focus();
+        }
+        if (e.key === 'u') {
+          e.preventDefault();
+          this.showUploadModal();
+        }
+      }
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.modal-overlay.active').forEach(modal => modal.remove());
+        document.getElementById('notifPanel')?.classList.remove('active');
+      }
+    });
   },
 
   showAuthPage() {
@@ -493,7 +539,8 @@ const App = {
             ${doc.description ? `<p style="margin-bottom:16px;color:var(--gray-500)">${doc.description}</p>` : ''}
             ${doc.tags?.length ? `<div style="margin-bottom:16px">${doc.tags.map(t => `<span class="tag" style="background:${t.couleur}22;color:${t.couleur};margin-right:4px">${t.nom}</span>`).join('')}</div>` : ''}
             <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
-              <a href="${API.getDownloadUrl(id)}" class="btn btn-primary"><i class="fas fa-download"></i> Télécharger</a>
+              <button class="btn btn-primary" onclick="App.openDocument('${id}','${doc.type_fichier}','${doc.titre.replace(/'/g, "\\'")}')"><i class="fas fa-eye"></i> Visualiser</button>
+              <a href="${API.getDownloadUrl(id)}" class="btn btn-outline"><i class="fas fa-download"></i> Télécharger</a>
               <button class="btn btn-outline" onclick="App.shareDocument('${id}')"><i class="fas fa-share-alt"></i> Partager</button>
               <button class="btn btn-outline ${doc.favori ? 'text-warning' : ''}" onclick="App.toggleFav('${id}', ${!doc.favori})">
                 <i class="fas fa-star"></i> ${doc.favori ? 'Retirer favori' : 'Ajouter favori'}
@@ -524,6 +571,236 @@ const App = {
       document.body.appendChild(overlay);
       overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     } catch (err) { this.showToast(err.message, 'error'); }
+  },
+
+  async openDocument(id, mimeType, title) {
+    this._showSoftwareDialog(id, mimeType, title);
+  },
+
+  _showSoftwareDialog(id, mimeType, title) {
+    const type = (mimeType || '').toLowerCase();
+    const cleanTitle = (title || 'Document').replace(/'/g, "\\'");
+
+    const isPdf = type.includes('pdf');
+    const isWord = type.includes('word') || type.includes('document') || type.includes('msword') || type.includes('docx');
+    const isExcel = type.includes('sheet') || type.includes('excel') || type.includes('spreadsheet') || type.includes('csv');
+    const isPpt = type.includes('presentation') || type.includes('powerpoint');
+    const isImage = type.startsWith('image/');
+    const isVideo = type.startsWith('video/');
+    const isAudio = type.startsWith('audio/');
+    const isText = type.startsWith('text/') || type.includes('json') || type.includes('xml') || type.includes('javascript');
+    const isZip = type.includes('zip') || type.includes('rar') || type.includes('7z') || type.includes('tar') || type.includes('compressed');
+
+    let softwareOptionsHtml = '';
+
+    if (isPdf) {
+      softwareOptionsHtml = `
+        <button class="software-option" onclick="App._launchSoftware('web', '${id}')">
+          <i class="fas fa-globe"></i>
+          <div>
+            <div class="software-name">Navigateur Web (Chrome / Edge / Firefox)</div>
+            <div class="software-desc">Prévisualiser directement dans l'onglet</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        <button class="software-option" onclick="App._launchSoftware('acrobat', '${id}')">
+          <i class="fas fa-file-pdf" style="color:#ef4444"></i>
+          <div>
+            <div class="software-name">Adobe Acrobat Reader / Foxit Reader</div>
+            <div class="software-desc">Ouvrir avec le lecteur PDF installé</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `;
+    } else if (isWord) {
+      softwareOptionsHtml = `
+        <button class="software-option" onclick="App._launchSoftware('ms-word', '${id}')">
+          <i class="fas fa-file-word" style="color:#2563eb"></i>
+          <div>
+            <div class="software-name">Microsoft Word</div>
+            <div class="software-desc">Ouvrir avec MS Office Word</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        <button class="software-option" onclick="App._launchSoftware('libreoffice', '${id}')">
+          <i class="fas fa-file-alt" style="color:#059669"></i>
+          <div>
+            <div class="software-name">LibreOffice Writer / WPS Office</div>
+            <div class="software-desc">Ouvrir avec votre suite bureautique</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `;
+    } else if (isExcel) {
+      softwareOptionsHtml = `
+        <button class="software-option" onclick="App._launchSoftware('ms-excel', '${id}')">
+          <i class="fas fa-file-excel" style="color:#16a34a"></i>
+          <div>
+            <div class="software-name">Microsoft Excel</div>
+            <div class="software-desc">Ouvrir le fichier avec MS Excel</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        <button class="software-option" onclick="App._launchSoftware('libreoffice-calc', '${id}')">
+          <i class="fas fa-table" style="color:#059669"></i>
+          <div>
+            <div class="software-name">LibreOffice Calc / WPS Spreadsheet</div>
+            <div class="software-desc">Ouvrir avec votre tableur préféré</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `;
+    } else if (isPpt) {
+      softwareOptionsHtml = `
+        <button class="software-option" onclick="App._launchSoftware('ms-powerpoint', '${id}')">
+          <i class="fas fa-file-powerpoint" style="color:#ea580c"></i>
+          <div>
+            <div class="software-name">Microsoft PowerPoint</div>
+            <div class="software-desc">Afficher la présentation dans MS PowerPoint</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `;
+    } else if (isImage) {
+      softwareOptionsHtml = `
+        <button class="software-option" onclick="App._launchSoftware('web', '${id}')">
+          <i class="fas fa-eye" style="color:#f59e0b"></i>
+          <div>
+            <div class="software-name">Visionneuse intégrée / Navigateur</div>
+            <div class="software-desc">Aperçu HD directement dans l'onglet</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        <button class="software-option" onclick="App._launchSoftware('photos', '${id}')">
+          <i class="fas fa-file-image" style="color:#ec4899"></i>
+          <div>
+            <div class="software-name">Photos Windows / Photoshop / GIMP</div>
+            <div class="software-desc">Ouvrir avec votre visionneuse système</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `;
+    } else if (isVideo || isAudio) {
+      softwareOptionsHtml = `
+        <button class="software-option" onclick="App._launchSoftware('web', '${id}')">
+          <i class="fas fa-play-circle" style="color:#8b5cf6"></i>
+          <div>
+            <div class="software-name">Lecteur Web intégré</div>
+            <div class="software-desc">Jouer la vidéo / audio dans le navigateur</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        <button class="software-option" onclick="App._launchSoftware('vlc', '${id}')">
+          <i class="fas fa-play" style="color:#f97316"></i>
+          <div>
+            <div class="software-name">VLC Media Player / Windows Media</div>
+            <div class="software-desc">Ouvrir dans votre lecteur multimédia</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `;
+    } else if (isText) {
+      softwareOptionsHtml = `
+        <button class="software-option" onclick="App._launchSoftware('web', '${id}')">
+          <i class="fas fa-globe"></i>
+          <div>
+            <div class="software-name">Affichage Navigateur</div>
+            <div class="software-desc">Afficher le texte dans un nouvel onglet</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        <button class="software-option" onclick="App._launchSoftware('vscode', '${id}')">
+          <i class="fas fa-code" style="color:#0284c7"></i>
+          <div>
+            <div class="software-name">VS Code / Notepad++ / Bloc-notes</div>
+            <div class="software-desc">Ouvrir avec votre éditeur de texte</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `;
+    } else if (isZip) {
+      softwareOptionsHtml = `
+        <button class="software-option" onclick="App._launchSoftware('archive-app', '${id}')">
+          <i class="fas fa-file-archive" style="color:#6366f1"></i>
+          <div>
+            <div class="software-name">WinRAR / 7-Zip / Explorateur</div>
+            <div class="software-desc">Ouvrir avec votre gestionnaire d'archives</div>
+          </div>
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      `;
+    }
+
+    softwareOptionsHtml += `
+      <button class="software-option software-option-none" onclick="App._handleNoSoftwareSelected(this)">
+        <i class="fas fa-times-circle" style="color:var(--danger)"></i>
+        <div>
+          <div class="software-name text-danger">Je n'ai pas de logiciel adapté sur ma machine</div>
+          <div class="software-desc">Indiquer qu'aucun logiciel compatible n'est disponible</div>
+        </div>
+        <i class="fas fa-chevron-right" style="color:var(--danger)"></i>
+      </button>
+    `;
+
+    const iconInfo = (typeof DocumentsPage !== 'undefined' && DocumentsPage.getFileIcon) ? DocumentsPage.getFileIcon(mimeType) : ['fa-file-alt', '#6b7280'];
+
+    const overlay = document.createElement('div');
+    overlay.className = 'preview-overlay active';
+    overlay.id = 'softwareDialogOverlay';
+    overlay.innerHTML = `
+      <div class="software-dialog">
+        <div class="preview-header">
+          <h2><i class="fas fa-desktop" style="color:var(--primary);margin-right:8px"></i>Choisir un logiciel adapté</h2>
+          <button class="modal-close" onclick="this.closest('.preview-overlay').remove()">&times;</button>
+        </div>
+        <div class="preview-body">
+          <div class="software-doc-info">
+            <i class="fas ${iconInfo[0]}" style="color:${iconInfo[1]};font-size:32px"></i>
+            <div>
+              <strong>${title || 'Document'}</strong>
+              <div class="text-muted" style="font-size:12px">${mimeType || 'Type de fichier'}</div>
+            </div>
+          </div>
+
+          <div id="softwareDialogAlert" style="display:none"></div>
+
+          <p class="software-intro">Choisissez le logiciel installé sur votre ordinateur pour ouvrir ce document :</p>
+
+          <div class="software-list">
+            ${softwareOptionsHtml}
+          </div>
+
+          <div class="software-note">
+            <i class="fas fa-info-circle"></i>
+            Si vous sélectionnez un logiciel installé sur votre machine, le document s'ouvrira directement dans l'application.
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  },
+
+  _handleNoSoftwareSelected(btnElement) {
+    const alertBox = document.getElementById('softwareDialogAlert');
+    if (alertBox) {
+      alertBox.className = 'software-alert-danger';
+      alertBox.style.display = 'flex';
+      alertBox.innerHTML = `<i class="fas fa-exclamation-triangle" style="font-size:18px"></i> <span>Vous ne pouvez pas visualiser le document</span>`;
+    }
+    this.showToast('Vous ne pouvez pas visualiser le document', 'error');
+  },
+
+  _launchSoftware(softwareType, id) {
+    if (softwareType === 'web') {
+      window.open(API.getDownloadUrl(id), '_blank');
+      document.getElementById('softwareDialogOverlay')?.remove();
+    } else {
+      this.downloadDocument(id);
+      this.showToast('Ouverture du fichier avec le logiciel sélectionné...', 'success');
+      document.getElementById('softwareDialogOverlay')?.remove();
+    }
   },
 
   async toggleFav(id, fav) {
@@ -631,8 +908,112 @@ const App = {
   },
 
   async globalSearch(q) {
-    if (!q || q.length < 2) return;
-    router.navigate('/search?q=' + encodeURIComponent(q));
+    if (!q || !q.trim()) return;
+    this.closeSearchDropdown();
+    router.navigate('/search?q=' + encodeURIComponent(q.trim()));
+  },
+
+  async showLiveSearchSuggestions(query) {
+    const q = (query || '').trim();
+    if (!q) {
+      this.closeSearchDropdown();
+      return;
+    }
+
+    try {
+      const data = await API.searchSuggestions(q);
+      const searchBar = document.querySelector('.search-bar');
+      if (!searchBar) return;
+
+      this.closeSearchDropdown();
+
+      const hasDocs = data.documents && data.documents.length > 0;
+      const hasFolders = data.folders && data.folders.length > 0;
+
+      if (!hasDocs && !hasFolders) {
+        const emptyDropdown = document.createElement('div');
+        emptyDropdown.className = 'search-dropdown';
+        emptyDropdown.id = 'searchDropdown';
+        emptyDropdown.innerHTML = `
+          <div class="search-dropdown-header">Aucun résultat instantané</div>
+          <div class="search-suggestion-item" style="cursor:default">
+            <div class="search-suggestion-content">
+              <div class="search-suggestion-title text-muted">Aucun document ne correspond à "${q}"</div>
+            </div>
+          </div>
+          <div class="search-dropdown-footer" onclick="App.globalSearch('${q.replace(/'/g, "\\'")}')">
+            Lancer la recherche complète &rarr;
+          </div>
+        `;
+        searchBar.appendChild(emptyDropdown);
+        return;
+      }
+
+      const dropdown = document.createElement('div');
+      dropdown.className = 'search-dropdown';
+      dropdown.id = 'searchDropdown';
+
+      let html = '';
+
+      if (hasDocs) {
+        html += `<div class="search-dropdown-header">Documents (${data.documents.length})</div>`;
+        data.documents.forEach(doc => {
+          const [icon, color] = typeof DocumentsPage !== 'undefined' && DocumentsPage.getFileIcon ? DocumentsPage.getFileIcon(doc.type_fichier) : ['fa-file-alt', '#6b7280'];
+          const titleHighlighted = this.highlightMatch(doc.titre, q);
+          const folderName = doc.dossier?.nom ? ` &middot; Dossier: ${doc.dossier.nom}` : '';
+          html += `
+            <div class="search-suggestion-item" onclick="App.previewDocument('${doc.id}'); App.closeSearchDropdown();">
+              <i class="fas ${icon} search-suggestion-icon" style="color:${color}"></i>
+              <div class="search-suggestion-content">
+                <div class="search-suggestion-title">${titleHighlighted}</div>
+                <div class="search-suggestion-meta">${this.formatSize(doc.taille)}${folderName}</div>
+              </div>
+            </div>
+          `;
+        });
+      }
+
+      if (hasFolders) {
+        html += `<div class="search-dropdown-header">Dossiers (${data.folders.length})</div>`;
+        data.folders.forEach(f => {
+          const nameHighlighted = this.highlightMatch(f.nom, q);
+          html += `
+            <div class="search-suggestion-item" onclick="router.navigate('/documents?dossier=${f.id}'); App.closeSearchDropdown();">
+              <i class="fas fa-folder search-suggestion-icon" style="color:#4f46e5"></i>
+              <div class="search-suggestion-content">
+                <div class="search-suggestion-title">${nameHighlighted}</div>
+                <div class="search-suggestion-meta">Dossier</div>
+              </div>
+            </div>
+          `;
+        });
+      }
+
+      html += `
+        <div class="search-dropdown-footer" onclick="App.globalSearch('${q.replace(/'/g, "\\'")}')">
+          Voir tous les résultats pour "${q}" &rarr;
+        </div>
+      `;
+
+      dropdown.innerHTML = html;
+      searchBar.appendChild(dropdown);
+    } catch (err) {
+      console.error('Erreur autocomplétion:', err);
+    }
+  },
+
+  closeSearchDropdown() {
+    const dropdown = document.getElementById('searchDropdown');
+    if (dropdown) dropdown.remove();
+  },
+
+  highlightMatch(text, query) {
+    if (!text || !query) return text || '';
+    const tokens = query.trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return text;
+    const escaped = tokens.map(t => t.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')).join('|');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    return (text || '').replace(regex, '<mark class="search-highlight">$1</mark>');
   },
 
   async loadNotifPanel() {

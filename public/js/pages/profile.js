@@ -91,15 +91,23 @@ const ProfilePage = {
       e.preventDefault();
       try {
         const isOrg = document.querySelector('input[name="profileType"]:checked').value === 'organisation';
-        const data = await API.updateProfile({
+        const payload = {
           prenom: document.getElementById('prenom').value,
           nom: document.getElementById('nom').value,
           telephone: document.getElementById('telephone').value,
           poste: document.getElementById('poste').value,
           langue: document.getElementById('langue').value,
-          type: isOrg ? 'organisation' : 'particulier',
-          nombre_employes: isOrg ? parseInt(document.getElementById('profileEmployes').value) : null
-        });
+          type: isOrg ? 'organisation' : 'particulier'
+        };
+        if (isOrg) {
+          const employes = parseInt(document.getElementById('profileEmployes').value);
+          if (!employes || employes < 1) {
+            App.showToast('Nombre d\'employés invalide', 'error');
+            return;
+          }
+          payload.nombre_employes = employes;
+        }
+        const data = await API.updateProfile(payload);
         Auth.updateUser(data.user);
         I18N.setLang(data.user.langue);
         App.updateUI();

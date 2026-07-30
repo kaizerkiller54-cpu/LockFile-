@@ -11,17 +11,77 @@ const docIncludes = [
   { model: Tag, as: 'tags', attributes: ['id', 'nom', 'couleur'], through: { attributes: [] } }
 ];
 
+// GET /api/search/suggestions - Live autocomplete suggestions
+router.get('/suggestions', auth, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 1) {
+      return res.json({ documents: [], folders: [] });
+    }
+
+    const queryStr = q.trim();
+    const tokens = queryStr.split(/\s+/).filter(Boolean);
+
+    // Build conditions for each token
+    const tokenConditions = tokens.map(token => ({
+      [Op.or]: [
+        { titre: { [Op.iLike]: `%${token}%` } },
+        { nom_original: { [Op.iLike]: `%${token}%` } },
+        { description: { [Op.iLike]: `%${token}%` } }
+      ]
+    }));
+
+    const docWhere = {
+      proprietaire_id: req.user.id,
+      statut: 'actif',
+      [Op.and]: tokenConditions
+    };
+
+    const documents = await Document.findAll({
+      where: docWhere,
+      include: docIncludes,
+      limit: 7,
+      order: [
+        // Prioritize exact or prefix matches on titre
+        [Document.sequelize.literal(`CASE WHEN LOWER("titre") LIKE LOWER('${queryStr.replace(/'/g, "''")}%') THEN 0 ELSE 1 END`), 'ASC'],
+        ['createdAt', 'DESC']
+      ]
+    });
+
+    const folderConditions = tokens.map(token => ({
+      nom: { [Op.iLike]: `%${token}%` }
+    }));
+
+    const folders = await Folder.findAll({
+      where: {
+        proprietaire_id: req.user.id,
+        [Op.and]: folderConditions
+      },
+      limit: 3
+    });
+
+    res.json({ documents, folders });
+  } catch (error) {
+    logger.error('Erreur suggestions recherche:', error);
+    res.status(500).json({ message: 'Erreur suggestions' });
+  }
+});
+
 router.get('/', auth, async (req, res) => {
   try {
     const { q, type, tag, dateDebut, dateFin, dossier, page = 1, limit = 20 } = req.query;
     const where = { proprietaire_id: req.user.id, statut: 'actif' };
 
-    if (q) {
-      where[Op.or] = [
-        { titre: { [Op.iLike]: `%${q}%` } },
-        { description: { [Op.iLike]: `%${q}%` } },
-        { nom_original: { [Op.iLike]: `%${q}%` } }
-      ];
+    if (q && q.trim()) {
+      const queryStr = q.trim();
+      const tokens = queryStr.split(/\s+/).filter(Boolean);
+      where[Op.and] = tokens.map(token => ({
+        [Op.or]: [
+          { titre: { [Op.iLike]: `%${token}%` } },
+          { description: { [Op.iLike]: `%${token}%` } },
+          { nom_original: { [Op.iLike]: `%${token}%` } }
+        ]
+      }));
     }
 
     if (type) where.type_fichier = { [Op.iLike]: `%${type}%` };
@@ -43,21 +103,31 @@ router.get('/', auth, async (req, res) => {
         required: true
       });
     }
+
+    const cleanQ = q ? q.trim().replace(/'/g, "''") : '';
+    const orderClause = cleanQ
+      ? [
+          [Document.sequelize.literal(`CASE WHEN LOWER("titre") LIKE LOWER('${cleanQ}%') THEN 0 ELSE 1 END`), 'ASC'],
+          ['createdAt', 'DESC']
+        ]
+      : [['createdAt', 'DESC']];
+
     const { rows: documents, count: total } = await Document.findAndCountAll({
       where,
       include: includeOpts,
-      order: [['createdAt', 'DESC']],
+      order: orderClause,
       distinct: true,
       offset,
       limit: parseInt(limit)
     });
 
     let folders = [];
-    if (q) {
+    if (q && q.trim()) {
+      const tokens = q.trim().split(/\s+/).filter(Boolean);
       folders = await Folder.findAll({
         where: {
           proprietaire_id: req.user.id,
-          nom: { [Op.iLike]: `%${q}%` }
+          [Op.and]: tokens.map(t => ({ nom: { [Op.iLike]: `%${t}%` } }))
         },
         limit: 5
       });
