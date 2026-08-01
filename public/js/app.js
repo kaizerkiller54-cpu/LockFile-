@@ -35,12 +35,14 @@ const App = {
     document.getElementById('sidebarName').textContent = `${u.prenom} ${u.nom}`;
     document.getElementById('sidebarRole').textContent = u.role;
     document.getElementById('headerName').textContent = u.prenom;
-    document.getElementById('sidebarAvatar').src = u.photo || '/assets/avatar-default.svg';
     document.getElementById('headerAvatar').src = u.photo || '/assets/avatar-default.svg';
+    document.getElementById('sidebarAvatar').src = u.photo || '/assets/avatar-default.svg';
     I18N.setLang(u.langue || 'fr');
     document.getElementById('langSelector').value = u.langue || 'fr';
     const adminSection = document.getElementById('adminNavSection');
     if (adminSection) adminSection.style.display = u.role === 'admin' ? 'block' : 'none';
+    const navApprovals = document.getElementById('navApprovals');
+    if (navApprovals) navApprovals.style.display = u.type === 'organisation' ? 'flex' : 'none';
     this.applyTheme();
   },
 
@@ -540,7 +542,7 @@ const App = {
             ${doc.tags?.length ? `<div style="margin-bottom:16px">${doc.tags.map(t => `<span class="tag" style="background:${t.couleur}22;color:${t.couleur};margin-right:4px">${t.nom}</span>`).join('')}</div>` : ''}
             <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
               <button class="btn btn-primary" onclick="App.openDocument('${id}','${doc.type_fichier}','${doc.titre.replace(/'/g, "\\'")}')"><i class="fas fa-eye"></i> Visualiser</button>
-              <a href="${API.getDownloadUrl(id)}" class="btn btn-outline"><i class="fas fa-download"></i> Télécharger</a>
+              <button class="btn btn-outline" onclick="App.downloadDocument('${id}')"><i class="fas fa-download"></i> Télécharger</button>
               <button class="btn btn-outline" onclick="App.shareDocument('${id}')"><i class="fas fa-share-alt"></i> Partager</button>
               <button class="btn btn-outline ${doc.favori ? 'text-warning' : ''}" onclick="App.toggleFav('${id}', ${!doc.favori})">
                 <i class="fas fa-star"></i> ${doc.favori ? 'Retirer favori' : 'Ajouter favori'}
@@ -574,7 +576,53 @@ const App = {
   },
 
   async openDocument(id, mimeType, title) {
+    let blob, filename;
+    try {
+      ({ blob, filename } = await API.downloadBlob(id));
+    } catch (err) {
+      this.showToast(err.message, 'error');
+      return;
+    }
+    const safeTitle = (title || 'document').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_');
+    const fileName = filename && filename !== 'document' ? filename : `${safeTitle}.${this._getExtension(mimeType)}`;
+    const file = new File([blob], fileName, { type: mimeType || 'application/octet-stream' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      this.showToast('Recherche d\'une application compatible...', 'info');
+      try {
+        await navigator.share({ files: [file] });
+      } catch (e) {
+        document.getElementById('softwareDialogOverlay')?.remove();
+        this.showToast('Impossible d\'ouvrir le document : aucune application compatible détectée sur cet appareil.', 'error');
+      }
+      return;
+    }
     this._showSoftwareDialog(id, mimeType, title);
+  },
+
+  _getExtension(mimeType) {
+    const m = (mimeType || '').toLowerCase();
+    const map = {
+      'application/pdf': 'pdf',
+      'application/msword': 'doc',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+      'application/vnd.ms-excel': 'xls',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+      'application/vnd.ms-powerpoint': 'ppt',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+      'text/plain': 'txt',
+      'text/csv': 'csv',
+      'application/zip': 'zip',
+      'application/x-rar-compressed': 'rar',
+      'application/json': 'json',
+      'application/xml': 'xml',
+      'application/octet-stream': 'bin'
+    };
+    if (map[m]) return map[m];
+    if (m.startsWith('image/')) return m.split('/')[1] === 'jpeg' ? 'jpg' : m.split('/')[1];
+    if (m.startsWith('video/')) return m.split('/')[1];
+    if (m.startsWith('audio/')) return m.split('/')[1];
+    return 'bin';
   },
 
   _showSoftwareDialog(id, mimeType, title) {
@@ -787,19 +835,31 @@ const App = {
     if (alertBox) {
       alertBox.className = 'software-alert-danger';
       alertBox.style.display = 'flex';
-      alertBox.innerHTML = `<i class="fas fa-exclamation-triangle" style="font-size:18px"></i> <span>Vous ne pouvez pas visualiser le document</span>`;
+      alertBox.innerHTML = `<i class="fas fa-exclamation-triangle" style="font-size:18px"></i> <span>Impossible d'ouvrir le document : aucune application compatible sur cet appareil</span>`;
     }
-    this.showToast('Vous ne pouvez pas visualiser le document', 'error');
+    this.showToast('Impossible d\'ouvrir le document : aucune application compatible sur cet appareil', 'error');
   },
 
   _launchSoftware(softwareType, id) {
     if (softwareType === 'web') {
-      window.open(API.getDownloadUrl(id), '_blank');
-      document.getElementById('softwareDialogOverlay')?.remove();
+      this._openViaTab(id);
     } else {
       this.downloadDocument(id);
       this.showToast('Ouverture du fichier avec le logiciel sélectionné...', 'success');
       document.getElementById('softwareDialogOverlay')?.remove();
+    }
+  },
+
+  async _openViaTab(id) {
+    try {
+      const { blob } = await API.downloadBlob(id);
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      if (!win) this.showToast('Votre navigateur a bloqué la nouvelle fenêtre', 'error');
+      document.getElementById('softwareDialogOverlay')?.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      this.showToast(err.message, 'error');
     }
   },
 
@@ -891,7 +951,12 @@ const App = {
   shareFolder(id, name) { this.shareDialog(id, 'folder', name); },
 
   async downloadDocument(id) {
-    window.open(API.getDownloadUrl(id), '_blank');
+    try {
+      await API.downloadFile(id);
+      this.showToast('Téléchargement lancé', 'success');
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
   },
 
   async confirmDelete(id) {

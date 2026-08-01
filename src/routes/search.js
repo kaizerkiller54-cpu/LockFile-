@@ -1,5 +1,5 @@
 const express = require('express');
-const { Op } = require('sequelize');
+const { Op, Sequelize } = require('sequelize');
 const { Document, Folder, Tag } = require('../models');
 const { auth } = require('../middleware/auth');
 const logger = require('../utils/logger');
@@ -10,6 +10,18 @@ const docIncludes = [
   { model: Folder, as: 'dossier', attributes: ['id', 'nom'] },
   { model: Tag, as: 'tags', attributes: ['id', 'nom', 'couleur'], through: { attributes: [] } }
 ];
+
+// Documents accessibles à l'utilisateur : les siens + ceux partagés
+// directement (document) ou via un dossier partagé
+function accessCondition(userId) {
+  return {
+    [Op.or]: [
+      { proprietaire_id: userId },
+      { id: { [Op.in]: Sequelize.literal(`(SELECT "document_id" FROM "permissions" WHERE "utilisateur_id" = ${userId} AND "document_id" IS NOT NULL)`) } },
+      { dossier_id: { [Op.in]: Sequelize.literal(`(SELECT "dossier_id" FROM "permissions" WHERE "utilisateur_id" = ${userId} AND "dossier_id" IS NOT NULL)`) } }
+    ]
+  };
+}
 
 // GET /api/search/suggestions - Live autocomplete suggestions
 router.get('/suggestions', auth, async (req, res) => {
@@ -32,9 +44,9 @@ router.get('/suggestions', auth, async (req, res) => {
     }));
 
     const docWhere = {
-      proprietaire_id: req.user.id,
       statut: 'actif',
-      [Op.and]: tokenConditions
+      [Op.and]: tokenConditions,
+      ...accessCondition(req.user.id)
     };
 
     const documents = await Document.findAll({
@@ -70,7 +82,7 @@ router.get('/suggestions', auth, async (req, res) => {
 router.get('/', auth, async (req, res) => {
   try {
     const { q, type, tag, dateDebut, dateFin, dossier, page = 1, limit = 20 } = req.query;
-    const where = { proprietaire_id: req.user.id, statut: 'actif' };
+    const where = { statut: 'actif', ...accessCondition(req.user.id) };
 
     if (q && q.trim()) {
       const queryStr = q.trim();

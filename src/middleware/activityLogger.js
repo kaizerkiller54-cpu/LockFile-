@@ -29,7 +29,7 @@ function activityMiddleware(action, cibleType, getDescription) {
           cibleType,
           cibleId: parseInt(cibleId) || null,
           description: typeof getDescription === 'function' ? getDescription(req, data) : getDescription,
-          details: { method: req.method, path: req.originalUrl },
+          details: { method: req.method, path: req.path },
           req,
         });
       }

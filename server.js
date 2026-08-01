@@ -52,7 +52,7 @@ app.use(securityHeaders);
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
   : true;
-app.use(cors({ origin: corsOrigins, credentials: true, maxAge: 86400 }));
+app.use(cors({ origin: corsOrigins, credentials: true, maxAge: 86400, exposedHeaders: ['Content-Disposition'] }));
 app.options('*', cors());
 
 const authLimiter = rateLimit({
@@ -88,7 +88,11 @@ app.use('/api/auth', authLimiter);
 app.use('/api', apiLimiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(morgan(':method :url :status :res[content-length] - :response-time ms', {
+app.use(morgan((tokens, req, res) => {
+  const status = tokens.status(req, res);
+  const size = tokens.res(req, res, 'content-length');
+  return `${tokens.method(req, res)} ${req.path} ${status || '-'} ${size ? size + ' -' : ''} ${(tokens['response-time'](req, res) || '').trim()} ms`;
+}, {
   stream: { write: msg => logger.info(msg.trim()) },
   skip: (req) => req.path === '/health'
 }));

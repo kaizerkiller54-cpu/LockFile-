@@ -113,7 +113,30 @@ const API = {
   patchTags(id, tags) { return this.patch(`/documents/${id}/tags`, { tags }); },
   getVersions(id) { return this.get(`/documents/${id}/versions`); },
   restoreVersion(id, versionId) { return this.post(`/documents/${id}/restore-version/${versionId}`); },
-  getDownloadUrl(id) { return `${this.baseUrl}/documents/download/${id}?token=${this.token}`; },
+  getDownloadUrl(id) { return `${this.baseUrl}/documents/download/${id}`; },
+  async downloadBlob(id) {
+    const headers = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const res = await fetch(`${this.baseUrl}/documents/download/${id}`, { headers });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Erreur de téléchargement');
+    }
+    const cd = res.headers.get('content-disposition') || '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+    return { blob: await res.blob(), filename: m ? decodeURIComponent(m[1]) : 'document' };
+  },
+  async downloadFile(id) {
+    const { blob, filename } = await this.downloadBlob(id);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  },
 
   // Folders
   getFolders(params = {}) {

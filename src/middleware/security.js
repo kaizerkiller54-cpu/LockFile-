@@ -75,7 +75,7 @@ function sanitizeError(err, req, res, next) {
   const status = err.status || err.statusCode || 500;
 
   if (status >= 500) {
-    logger.error(`${req.method} ${req.originalUrl}`, {
+    logger.error(`${req.method} ${req.path}`, {
       requestId: req.id,
       status,
       message: err.message,
