@@ -7255,3 +7255,12 @@
 2026-08-01 16:27:42.678 [INFO] GET / 200 59 - 18.792 ms
 2026-08-01 16:28:12.676 [INFO] GET / 200 59 - 17.260 ms
 2026-08-01 16:28:42.654 [INFO] GET / 200 59 - 7.494 ms
+2026-08-02 17:34:51.931 [INFO] Supabase initialisé avec succès
+2026-08-02 17:34:51.936 [INFO] REDIS_URL non définie, traitement synchrone (pas de file d'attente)
+2026-08-02 17:34:51.962 [INFO] OCR (Tesseract.js) disponible
+2026-08-02 17:34:52.055 [INFO] Image processing (Sharp) disponible
+2026-08-02 17:34:52.055 [INFO] MEILI_HOST non définie, recherche via Sequelize (pas Meilisearch)
+2026-08-02 17:34:52.274 [INFO] docxService (mammoth) disponible
+2026-08-02 17:34:52.278 [INFO] Vérification des expirations démarrée (interval: 1h)
+2026-08-02 17:34:52.295 [INFO] Serveur démarré sur http://localhost:5000 (PID: 24436)
+2026-08-02 17:35:22.429 [INFO] GET /sw.js 304  9.193 ms
