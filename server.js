@@ -4,18 +4,33 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { connectDB, getPoolStats } = require('./src/config/db');
 const { init: initSupabase } = require('./src/config/supabase');
+const { authLimiter, apiLimiter, sharingLimiter } = require('./src/config/rateLimit');
 const queue = require('./src/config/queue');
 const ocrService = require('./src/services/ocrService');
 const imageProcessor = require('./src/services/imageProcessor');
 const searchService = require('./src/services/searchService');
 const logger = require('./src/utils/logger');
 const { requestId, securityHeaders, sanitizeError, sanitizeInput } = require('./src/middleware/security');
-const { auth } = require('./src/middleware/auth');
+const { auth, checkRole } = require('./src/middleware/auth');
 const fs = require('fs');
+
+if (!process.env.JWT_SECRET) {
+  logger.error('JWT_SECRET est requis dans .env. Arrêt du serveur.');
+  process.exit(1);
+}
+if (!process.env.ENCRYPTION_KEY) {
+  logger.error('ENCRYPTION_KEY est requise dans .env. Arrêt du serveur.');
+  process.exit(1);
+}
+if (process.env.JWT_SECRET.length < 32) {
+  logger.warn('Avertissement: JWT_SECRET est trop court (< 32 caractères). Utilisez une valeur aléatoire longue.');
+}
+if (process.env.ENCRYPTION_KEY.length < 32) {
+  logger.warn('Avertissement: ENCRYPTION_KEY est trop courte (< 32 caractères). Utilisez une clé aléatoire de 32+ caractères.');
+}
 
 const app = express();
 const server = require('http').createServer(app);
@@ -44,50 +59,38 @@ app.use(compression({ filter: (req, res) => {
 }, level: 6, threshold: 1024 }));
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      "default-src": ["'self'"],
+      "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      "script-src-attr": ["'unsafe-inline'"],
+      "style-src": ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
+      "img-src": ["'self'", "data:", "blob:", "https:"],
+      "font-src": ["'self'", "data:", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com", "https:"],
+      "connect-src": ["'self'", "https:", "wss:"],
+      "media-src": ["'self'", "blob:", "data:", "https:"],
+      "object-src": ["'none'"],
+      "base-uri": ["'self'"],
+      "frame-ancestors": ["'none'"],
+      "form-action": ["'self'"],
+      "worker-src": ["'self'", "blob:"]
+    }
+  },
   hsts: { maxAge: 31536000, includeSubDomains: true }
 }));
 app.use(securityHeaders);
 
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
-  : true;
+  : false;
 app.use(cors({ origin: corsOrigins, credentials: true, maxAge: 86400, exposedHeaders: ['Content-Disposition'] }));
-app.options('*', cors());
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Trop de tentatives, réessayez plus tard' }
-});
-const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Trop de requêtes, veuillez réessayer plus tard' }
-});
-const uploadLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Trop d\'uploads, réessayez plus tard' }
-});
-const sharingLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 50,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Trop d\'actions de partage, réessayez plus tard' }
-});
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use('/api/auth', authLimiter);
 app.use('/api', apiLimiter);
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan((tokens, req, res) => {
   const status = tokens.status(req, res);
   const size = tokens.res(req, res, 'content-length');
@@ -114,7 +117,7 @@ app.get('/health', async (req, res) => {
   res.status(status).json(health);
 });
 
-app.get('/api/stats', auth, async (req, res) => {
+app.get('/api/stats', auth, checkRole('admin'), async (req, res) => {
   try {
     const pool = getPoolStats();
     res.json({ uptime: process.uptime(), memory: process.memoryUsage(), pool, pid: process.pid });
@@ -122,7 +125,7 @@ app.get('/api/stats', auth, async (req, res) => {
 });
 
 app.use('/api/auth', require('./src/routes/auth'));
-app.use('/api/documents', uploadLimiter, require('./src/routes/documents'));
+app.use('/api/documents', require('./src/routes/documents'));
 app.use('/api/folders', require('./src/routes/folders'));
 app.use('/api/tags', require('./src/routes/tags'));
 app.use('/api/users', require('./src/routes/users'));

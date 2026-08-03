@@ -14,6 +14,7 @@ const DocumentsPage = {
 
   async render() {
     this.parseUrlParams();
+    this.filters.sort = this.filters.sort || localStorage.getItem('docSort') || 'date';
     const content = document.getElementById('pageContent');
     const folderFilter = this.filters.dossier;
     content.innerHTML = `
@@ -41,6 +42,13 @@ const DocumentsPage = {
         <select class="form-control" id="filterTag" style="max-width:200px"><option value="">Toutes les étiquettes</option></select>
         <button class="btn btn-sm btn-outline" id="filterFav"><i class="fas fa-star"></i> Favoris</button>
         <input type="text" class="form-control" id="filterSearch" placeholder="Rechercher..." style="max-width:200px">
+        <select class="form-control" id="filterSort" style="max-width:240px" title="Trier">
+          <option value="date">Date d'ajout (récent → ancien)</option>
+          <option value="recent">Récents (dernière modif)</option>
+          <option value="type">Type (Z → A)</option>
+          <option value="taille">Taille (grande → petite)</option>
+        </select>
+        <span class="text-muted dnd-hint" style="font-size:12px;margin-left:auto" title="Glisser-déposer"><i class="fas fa-hand-pointer"></i> Double-clic pour déplacer vers un dossier</span>
       </div>
       <div id="documentsContainer">${this.currentView === 'grille' ? Skeleton.card(6) : Skeleton.table(6, 8)}</div>
       <div class="pagination" id="docPagination"></div>
@@ -60,6 +68,14 @@ const DocumentsPage = {
     document.getElementById('filterSearch').oninput = (e) => {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => { this.filters.q = e.target.value; this.currentPage = 1; this.loadDocs(); }, 300);
+    };
+    const sortSel = document.getElementById('filterSort');
+    sortSel.value = this.filters.sort;
+    sortSel.onchange = (e) => {
+      this.filters.sort = e.target.value;
+      localStorage.setItem('docSort', e.target.value);
+      this.currentPage = 1;
+      this.loadDocs();
     };
     await this.loadFolders();
     await this.loadTags();
@@ -98,6 +114,7 @@ const DocumentsPage = {
       if (this.filters.tag) params.tag = this.filters.tag;
       if (this.filters.favori) params.favori = this.filters.favori;
       if (this.filters.q) params.q = this.filters.q;
+      if (this.filters.sort) params.sort = this.filters.sort;
 
       const data = await API.getDocuments(params);
       const container = document.getElementById('documentsContainer');
@@ -110,6 +127,7 @@ const DocumentsPage = {
       }
 
       container.innerHTML = this.currentView === 'grille' ? this.renderGrid(data.documents) : this.renderList(data.documents);
+      this._bindDocContainer(container);
       this.renderPagination(data.page, data.pages);
     } catch (err) { document.getElementById('documentsContainer').innerHTML = '<p class="text-center text-muted">Erreur de chargement</p><p class="text-center text-danger" style="font-size:0.8em">' + (err.message || '') + '</p>'; }
   },
@@ -131,15 +149,15 @@ const DocumentsPage = {
     return `<div class="doc-grid">${docs.map(d => {
       const [icon, color] = this.getFileIcon(d.type_fichier);
       const tags = d.tags?.map(t => `<span class="tag" style="background:${t.couleur}22;color:${t.couleur};cursor:pointer" onclick="event.stopPropagation();DocumentsPage.filterByTag('${t.id}')">${t.nom}</span>`).join('') || '';
-      return `<div class="doc-card">
-        <div onclick="App.previewDocument('${d.id}')">
+      return `<div class="doc-card" data-id="${d.id}" data-type="${d.type_fichier}">
+        <div onclick="DocumentsPage.onCardClick('${d.id}', event)">
           <div class="doc-card-icon" style="background:${color}15;color:${color}"><i class="fas ${icon}"></i></div>
           <div class="doc-card-title">${d.titre}</div>
           <div class="doc-card-meta">${App.formatSize(d.taille)} · ${new Date(d.createdAt).toLocaleDateString()}</div>
           ${tags ? `<div class="doc-card-tags">${tags}</div>` : ''}
         </div>
         <div class="doc-card-actions" style="opacity:1;position:static;margin-top:8px;display:flex;gap:4px">
-          <i class="fas fa-eye btn-icon-sm text-primary" onclick="event.stopPropagation();App.openDocument('${d.id}','${d.type_fichier}','${d.titre.replace(/'/g, "\\'")}')" title="Visualiser le document"></i>
+          <i class="fas fa-folder-plus btn-icon-sm" onclick="event.stopPropagation();DocumentsPage.openFolderMenu('${d.id}', this)" title="Ajouter à un dossier"></i>
           <i class="fas fa-download btn-icon-sm" onclick="event.stopPropagation();App.downloadDocument('${d.id}')" title="Télécharger"></i>
           <i class="fas fa-archive btn-icon-sm text-muted" onclick="event.stopPropagation();App.archiveDocument('${d.id}')" title="Archiver"></i>
           <i class="fas fa-trash btn-icon-sm text-danger" onclick="event.stopPropagation();App.confirmDelete('${d.id}')" title="Supprimer"></i>
@@ -155,7 +173,7 @@ const DocumentsPage = {
       <tbody>${docs.map(d => {
         const [icon, color] = this.getFileIcon(d.type_fichier);
         const tags = d.tags?.map(t => `<span class="tag" style="background:${t.couleur}22;color:${t.couleur};cursor:pointer" onclick="event.stopPropagation();DocumentsPage.filterByTag('${t.id}')">${t.nom}</span>`).join(' ') || '';
-        return `<tr onclick="App.previewDocument('${d.id}')" style="cursor:pointer">
+        return `<tr data-id="${d.id}" data-type="${d.type_fichier}" onclick="DocumentsPage.onCardClick('${d.id}', event)" style="cursor:pointer">
           <td><i class="fas ${icon}" style="color:${color};font-size:18px"></i></td>
           <td><strong>${d.titre}</strong></td>
           <td>${d.type_fichier?.split('/')[1] || '-'}</td>
@@ -164,7 +182,7 @@ const DocumentsPage = {
           <td>${d.dossier?.nom || '-'}</td>
           <td>${tags || '<span class="text-muted" style="font-size:11px">—</span>'}</td>
           <td><span class="doc-card-actions" style="position:static;opacity:1">
-            <i class="fas fa-eye btn-icon-sm text-primary" onclick="event.stopPropagation();App.openDocument('${d.id}','${d.type_fichier}','${d.titre.replace(/'/g, "\\'")}')" title="Visualiser le document"></i>
+            <i class="fas fa-folder-plus btn-icon-sm" onclick="event.stopPropagation();DocumentsPage.openFolderMenu('${d.id}', this)" title="Ajouter à un dossier"></i>
             <i class="fas fa-download btn-icon-sm" onclick="event.stopPropagation();App.downloadDocument('${d.id}')" title="Télécharger"></i>
             <i class="fas fa-archive btn-icon-sm text-muted" onclick="event.stopPropagation();App.archiveDocument('${d.id}')" title="Archiver"></i>
             <i class="fas fa-trash btn-icon-sm text-danger" onclick="event.stopPropagation();App.confirmDelete('${d.id}')" title="Supprimer"></i>
@@ -197,6 +215,36 @@ const DocumentsPage = {
   goTo(page) {
     this.currentPage = page;
     this.loadDocs();
+  },
+
+  onCardClick(id) {
+    clearTimeout(this._singleClickTimer);
+    this._singleClickTimer = setTimeout(() => {
+      if (this._dragTriggered) {
+        this._dragTriggered = false;
+        return;
+      }
+      App.previewDocument(id);
+    }, 220);
+  },
+
+  openFolderMenu(docId, anchor) {
+    App.showFolderPicker(docId, anchor);
+  },
+
+  _bindDocContainer(container) {
+    if (!container) return;
+    container.addEventListener('dblclick', (e) => {
+      if (e.button !== 0 && e.type === 'mousedown') return;
+      const card = e.target.closest('.doc-card') || e.target.closest('tr[data-id]');
+      if (!card || e.target.closest('.doc-card-actions, button, a, select, input, .folder-picker')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof DragDrop === 'undefined') return;
+      clearTimeout(this._singleClickTimer);
+      this._dragTriggered = true;
+      DragDrop.grab(card.dataset.id, card, e);
+    });
   },
 
   filterByTag(tagId) {

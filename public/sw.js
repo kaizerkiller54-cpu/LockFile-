@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lockfile-v7';
+const CACHE_NAME = 'lockfile-v13';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -9,6 +9,7 @@ const STATIC_ASSETS = [
   '/js/router.js',
   '/js/i18n.js',
   '/js/skeleton.js',
+  '/js/drag-drop.js',
   '/js/pages/dashboard.js',
   '/js/pages/documents.js',
   '/js/pages/folders.js',

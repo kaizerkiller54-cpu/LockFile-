@@ -4,6 +4,7 @@ const { body, validationResult } = require('express-validator');
 const { Op } = require('sequelize');
 const { User } = require('../models');
 const { auth } = require('../middleware/auth');
+const { ISSUER, AUDIENCE } = require('../config/jwt');
 const { getClient, getAuthClient } = require('../config/supabase');
 const logger = require('../utils/logger');
 const { sanitizeString } = require('../utils/sanitize');
@@ -16,7 +17,7 @@ const generateToken = (user) => {
   return jwt.sign(
     { id: user.id, role: user.role },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN }
+    { expiresIn: process.env.JWT_EXPIRES_IN || '8h', issuer: ISSUER, audience: AUDIENCE }
   );
 };
 

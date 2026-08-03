@@ -9,6 +9,22 @@ const { logActivity } = require('../middleware/activityLogger');
 
 const router = express.Router();
 
+async function validateParentFolder(parentId, userId, currentFolderId = null) {
+  if (parentId === undefined || parentId === null || parentId === '' || parentId === 'null') {
+    return { ok: true, value: null };
+  }
+
+  const parent = await Folder.findOne({
+    where: { id: parentId, proprietaire_id: userId }
+  });
+  if (!parent) return { ok: false, message: 'Dossier parent invalide ou non autorisé' };
+  if (currentFolderId && String(parent.id) === String(currentFolderId)) {
+    return { ok: false, message: 'Un dossier ne peut pas être son propre parent' };
+  }
+
+  return { ok: true, value: parent.id };
+}
+
 router.get('/', auth, async (req, res) => {
   try {
     const { parent } = req.query;
@@ -77,10 +93,12 @@ router.post('/', auth, folderFields, async (req, res) => {
     const description = sanitizeOptional(req.body.description);
     const couleur = req.body.couleur || '#4f46e5';
     const icone = req.body.icone || 'folder';
+    const parentCheck = await validateParentFolder(req.body.parent, req.user.id);
+    if (!parentCheck.ok) return res.status(403).json({ message: parentCheck.message });
     const folder = await Folder.create({
       nom,
       description: description || '',
-      parent_id: req.body.parent || null,
+      parent_id: parentCheck.value,
       couleur,
       icone,
       proprietaire_id: req.user.id
@@ -117,7 +135,12 @@ router.put('/:id', auth, folderFields, async (req, res) => {
     if (req.body.description !== undefined) folder.description = sanitizeString(req.body.description);
     if (req.body.couleur !== undefined) folder.couleur = req.body.couleur;
     if (req.body.icone !== undefined) folder.icone = sanitizeString(req.body.icone);
-    if (req.body.parent !== undefined) folder.parent_id = req.body.parent || null;
+
+    if (req.body.parent !== undefined) {
+      const parentCheck = await validateParentFolder(req.body.parent, req.user.id, folder.id);
+      if (!parentCheck.ok) return res.status(403).json({ message: parentCheck.message });
+      folder.parent_id = parentCheck.value;
+    }
 
     await folder.save();
     

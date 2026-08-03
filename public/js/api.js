@@ -113,7 +113,6 @@ const API = {
   patchTags(id, tags) { return this.patch(`/documents/${id}/tags`, { tags }); },
   getVersions(id) { return this.get(`/documents/${id}/versions`); },
   restoreVersion(id, versionId) { return this.post(`/documents/${id}/restore-version/${versionId}`); },
-  getDownloadUrl(id) { return `${this.baseUrl}/documents/download/${id}`; },
   async downloadBlob(id) {
     const headers = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;

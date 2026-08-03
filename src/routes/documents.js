@@ -4,29 +4,119 @@ const { Op } = require('sequelize');
 const { body, query, validationResult } = require('express-validator');
 const { Document, Folder, Tag, Version, Notification, Permission, sequelize } = require('../models');
 const { auth } = require('../middleware/auth');
+const { uploadLimiter, downloadLimiter } = require('../config/rateLimit');
 const upload = require('../middleware/upload');
 const logger = require('../utils/logger');
 const { encryptFile, decryptFile, decompressBuffer } = require('../utils/crypto');
 const { sanitizeString, sanitizeOptional, sanitizeTags } = require('../utils/sanitize');
+const { assertValidFile } = require('../utils/fileValidation');
 const storage = require('../utils/storage');
 const { logActivity } = require('../middleware/activityLogger');
 const fs = require('fs');
 const path = require('path');
 
+const { idParam, paginationQuery } = require('../middleware/validateParams');
+
 const router = express.Router();
 
-// Check if user can access document (owner or has ecriture permission)
-async function canModifyDoc(docId, userId, include) {
-  let doc = await Document.findOne({
-    where: { id: docId, proprietaire_id: userId },
-    include
+const MAX_LIST_LIMIT = 100;
+const WRITE_PERMISSION_LEVELS = new Set(['ecriture', 'suppression']);
+
+function activePermissionWhere(userId) {
+  return {
+    utilisateur_id: userId,
+    [Op.or]: [
+      { expiration: null },
+      { expiration: { [Op.gt]: new Date() } }
+    ]
+  };
+}
+
+async function getSharedAccessIds(userId) {
+  const permissions = await Permission.findAll({
+    attributes: ['document_id', 'dossier_id', 'niveau'],
+    where: activePermissionWhere(userId),
+    raw: true
   });
-  if (doc) return doc;
-  const perm = await Permission.findOne({
-    where: { document_id: docId, utilisateur_id: userId, niveau: 'ecriture' }
+
+  return {
+    documentIds: permissions
+      .map(p => p.document_id)
+      .filter(Boolean),
+    folderIds: permissions
+      .map(p => p.dossier_id)
+      .filter(Boolean)
+  };
+}
+
+function parsePositiveInt(value, fallback, max) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(n, max);
+}
+
+// Lecture : propriétaire ou permission partagée (lecture / écriture)
+async function canAccessDoc(docId, userId, include) {
+  const doc = await Document.findByPk(docId, { include });
+  if (!doc) return null;
+  if (doc.proprietaire_id === userId) return doc;
+
+  const directPerm = await Permission.findOne({
+    where: { ...activePermissionWhere(userId), document_id: doc.id }
   });
-  if (perm) return await Document.findByPk(docId, { include });
+  if (directPerm) return doc;
+
+  if (doc.dossier_id) {
+    const folderPerm = await Permission.findOne({
+      where: { ...activePermissionWhere(userId), dossier_id: doc.dossier_id }
+    });
+    if (folderPerm) return doc;
+  }
+
   return null;
+}
+
+// Modification : propriétaire ou permission écriture
+async function canModifyDoc(docId, userId, include) {
+  const doc = await Document.findByPk(docId, { include });
+  if (!doc) return null;
+  if (doc.proprietaire_id === userId) return doc;
+
+  const directPerm = await Permission.findOne({
+    where: {
+      ...activePermissionWhere(userId),
+      document_id: doc.id,
+      niveau: { [Op.in]: Array.from(WRITE_PERMISSION_LEVELS) }
+    }
+  });
+  if (directPerm) return doc;
+
+  if (doc.dossier_id) {
+    const folderPerm = await Permission.findOne({
+      where: {
+        ...activePermissionWhere(userId),
+        dossier_id: doc.dossier_id,
+        niveau: { [Op.in]: Array.from(WRITE_PERMISSION_LEVELS) }
+      }
+    });
+    if (folderPerm) return doc;
+  }
+
+  return null;
+}
+
+// Validate that a folder belongs to the current user before assigning a document to it
+async function validateFolderOwnership(dossier, userId) {
+  if (dossier === undefined || dossier === null || dossier === '' || dossier === 'null') {
+    return { ok: true, value: null };
+  }
+  const folder = await Folder.findOne({ where: { id: dossier, proprietaire_id: userId } });
+  if (!folder) return { ok: false };
+  return { ok: true, value: folder.id };
+}
+
+function sanitizeOriginalName(name) {
+  return path.basename(String(name || '')).replace(/[\r\n\u0000-\u001F\u007F]/g, '');
 }
 
 const docIncludes = [
@@ -34,26 +124,42 @@ const docIncludes = [
   { model: Tag, as: 'tags', attributes: ['id', 'nom', 'couleur'], through: { attributes: [] } }
 ];
 
-router.get('/', auth, async (req, res) => {
+router.get('/', auth, paginationQuery, async (req, res) => {
   try {
-    const { dossier, statut, favori, tag, page = 1, limit = 20 } = req.query;
+    const { dossier, statut, favori, tag, sort, q } = req.query;
+    const page = parsePositiveInt(req.query.page, 1, 10000);
+    const limit = parsePositiveInt(req.query.limit, 20, MAX_LIST_LIMIT);
 
-    const where = { statut: statut || 'actif' };
-    if (dossier !== undefined) where.dossier_id = dossier === 'null' ? null : dossier;
-    if (favori === 'true') {
-      where.proprietaire_id = req.user.id;
-      where.favori = true;
-    } else {
-      const sharedIds = (await Permission.findAll({
-        attributes: ['document_id'],
-        where: { utilisateur_id: req.user.id, document_id: { [Op.ne]: null } },
-        raw: true
-      })).map(p => p.document_id).filter(Boolean);
-      where[Op.or] = [
-        { proprietaire_id: req.user.id },
-        { id: sharedIds }
-      ];
+    const statutVal = statut || 'actif';
+    const andClauses = [{ statut: statutVal }];
+
+    if (q && String(q).trim()) {
+      const term = `%${sanitizeString(String(q).trim()).slice(0, 200)}%`;
+      andClauses.push({
+        [Op.or]: [
+          { titre: { [Op.iLike]: term } },
+          { description: { [Op.iLike]: term } },
+          { nom_original: { [Op.iLike]: term } }
+        ]
+      });
     }
+    if (dossier !== undefined) {
+      andClauses.push({ dossier_id: dossier === 'null' ? null : dossier });
+    }
+    if (favori === 'true') {
+      andClauses.push({ proprietaire_id: req.user.id, favori: true });
+    } else {
+      const { documentIds, folderIds } = await getSharedAccessIds(req.user.id);
+      andClauses.push({
+        [Op.or]: [
+          { proprietaire_id: req.user.id },
+          ...(documentIds.length ? [{ id: { [Op.in]: documentIds } }] : []),
+          ...(folderIds.length ? [{ dossier_id: { [Op.in]: folderIds } }] : [])
+        ]
+      });
+    }
+
+    const where = { [Op.and]: andClauses };
 
     const include = [];
     include.push({ model: Folder, as: 'dossier', attributes: ['id', 'nom'] });
@@ -69,16 +175,23 @@ router.get('/', auth, async (req, res) => {
       include.push({ model: Tag, as: 'tags', attributes: ['id', 'nom', 'couleur'], through: { attributes: [] } });
     }
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const offset = (page - 1) * limit;
+    const sortOrders = {
+      date: [['createdAt', 'DESC']],
+      recent: [['updatedAt', 'DESC']],
+      type: [['type_fichier', 'DESC']],
+      taille: [['taille', 'DESC']]
+    };
+    const allowedSort = sortOrders[sort] ? sort : 'date';
     const { rows: documents, count: total } = await Document.findAndCountAll({
       where,
       include,
-      order: [['createdAt', 'DESC']],
+      order: sortOrders[allowedSort] || sortOrders.date,
       offset,
-      limit: parseInt(limit),
+      limit,
       distinct: true
     });
-    res.json({ documents, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
+    res.json({ documents, total, page, pages: Math.ceil(total / limit) });
   } catch (error) {
     logger.error('Erreur liste documents:', error);
     res.status(500).json({ message: 'Erreur serveur' });
@@ -87,19 +200,15 @@ router.get('/', auth, async (req, res) => {
 
 router.get('/recent', auth, async (req, res) => {
   try {
-    const sharedIds = await Permission.findAll({
-      attributes: ['document_id'],
-      where: { utilisateur_id: req.user.id, document_id: { [Op.ne]: null } },
-      raw: true
-    });
-    const sharedDocIds = sharedIds.map(p => p.document_id).filter(Boolean);
+    const { documentIds: sharedDocIds, folderIds: sharedFolderIds } = await getSharedAccessIds(req.user.id);
 
     const documents = await Document.findAll({
       where: {
         statut: 'actif',
         [Op.or]: [
           { proprietaire_id: req.user.id },
-          { id: sharedDocIds }
+          ...(sharedDocIds.length ? [{ id: { [Op.in]: sharedDocIds } }] : []),
+          ...(sharedFolderIds.length ? [{ dossier_id: { [Op.in]: sharedFolderIds } }] : [])
         ]
       },
       include: docIncludes,
@@ -117,16 +226,13 @@ router.get('/stats', auth, async (req, res) => {
   try {
     const userId = req.user.id;
     const weekAgo = new Date(Date.now() - 7 * 86400000);
-    const sharedIds = (await Permission.findAll({
-      attributes: ['document_id'],
-      where: { utilisateur_id: userId, document_id: { [Op.ne]: null } },
-      raw: true
-    })).map(p => p.document_id).filter(Boolean);
+    const { documentIds: sharedDocIds, folderIds: sharedFolderIds } = await getSharedAccessIds(userId);
 
     const accessFilter = {
       [Op.or]: [
         { proprietaire_id: userId },
-        { id: sharedIds }
+        ...(sharedDocIds.length ? [{ id: { [Op.in]: sharedDocIds } }] : []),
+        ...(sharedFolderIds.length ? [{ dossier_id: { [Op.in]: sharedFolderIds } }] : [])
       ]
     };
     const ownerFilter = { proprietaire_id: userId };
@@ -151,9 +257,68 @@ router.get('/stats', auth, async (req, res) => {
   }
 });
 
-router.get('/:id', auth, async (req, res) => {
+router.get('/download/:id', auth, downloadLimiter, ...idParam('id'), async (req, res) => {
   try {
-    const doc = await canModifyDoc(req.params.id, req.user.id, docIncludes);
+    const userId = req.user.id;
+
+    const doc = await canAccessDoc(req.params.id, userId);
+    if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
+    if (doc.statut === 'supprime') return res.status(410).json({ message: 'Document supprimé' });
+
+    logActivity({
+      userId: userId,
+      action: 'document_telecharge',
+      cibleType: 'document',
+      cibleId: doc.id,
+      description: `Document "${doc.titre}" téléchargé`,
+      req
+    });
+
+    if (doc.firebase_path) {
+      try {
+        if (doc.statut === 'archive') {
+          const compressed = await storage.downloadFile(doc.firebase_path);
+          if (compressed) {
+            const data = decompressBuffer(compressed);
+            res.setHeader('Content-Type', doc.type_fichier || 'application/octet-stream');
+            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(doc.nom_original)}"`);
+            res.setHeader('Content-Length', data.length);
+            return res.send(data);
+          }
+        } else {
+          const cloudUrl = await storage.getDownloadUrl(doc.firebase_path);
+          if (cloudUrl) return res.redirect(cloudUrl);
+        }
+      } catch (e) { logger.error('Erreur download cloud:', e); }
+    }
+
+    const uploadsDir = path.resolve(process.env.UPLOAD_DIR || 'uploads');
+    const filePath = path.resolve(doc.chemin);
+    if (filePath !== uploadsDir && !filePath.startsWith(uploadsDir + path.sep)) {
+      return res.status(403).json({ message: 'Accès non autorisé' });
+    }
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: 'Fichier introuvable sur le disque' });
+    }
+    try {
+      const data = decryptFile(filePath);
+      res.setHeader('Content-Type', doc.type_fichier || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(doc.nom_original)}"`);
+      res.setHeader('Content-Length', data.length);
+      res.send(data);
+    } catch (e) {
+      logger.error('Erreur déchiffrement:', e);
+      res.download(filePath, doc.nom_original);
+    }
+  } catch (error) {
+    logger.error('Erreur download:', error);
+    res.status(500).json({ message: 'Erreur téléchargement' });
+  }
+});
+
+router.get('/:id', auth, ...idParam('id'), async (req, res) => {
+  try {
+    const doc = await canAccessDoc(req.params.id, req.user.id, docIncludes);
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
     res.json({ document: doc });
   } catch (error) {
@@ -166,21 +331,35 @@ const validateDocInput = [
   body('titre').optional().trim().isLength({ max: 255 }).withMessage('Titre trop long (max 255)'),
   body('description').optional().trim().isLength({ max: 5000 }).withMessage('Description trop longue'),
   body('dossier').optional({ values: 'falsy' }).isInt().withMessage('Dossier invalide'),
-  body('tags').optional().isArray().withMessage('Tags doit être un tableau'),
+  body('tags').optional().custom(value => Array.isArray(value) || typeof value === 'string').withMessage('Tags doit être un tableau'),
   body('favori').optional().isBoolean().withMessage('Favori doit être un booléen'),
   body('commentaire').optional().trim().isLength({ max: 500 }).withMessage('Commentaire trop long'),
   body('date_expiration').optional({ values: 'falsy' }).isISO8601().withMessage('Date d\'expiration invalide'),
   body('jours_alerte').optional().isInt({ min: 1, max: 365 }).withMessage('Jours d\'alerte: 1-365'),
 ];
 
-router.post('/', auth, upload.single('fichier'), validateDocInput, async (req, res) => {
+router.post('/', auth, uploadLimiter, upload.single('fichier'), validateDocInput, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'Fichier requis' });
 
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const fileCheck = assertValidFile(req.file.path, req.file.mimetype);
+    if (!fileCheck.ok) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(415).json({ message: 'Contenu du fichier incohérent avec le type déclaré' });
+    }
 
     const { dossier, tags } = req.body;
+    const folderCheck = await validateFolderOwnership(dossier, req.user.id);
+    if (!folderCheck.ok) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(403).json({ message: 'Dossier invalide ou non autorisé' });
+    }
     const titre = sanitizeString(req.body.titre) || req.file.originalname.replace(/\.[^/.]+$/, '');
     const description = sanitizeString(req.body.description) || '';
     const tagIds = sanitizeTags(tags);
@@ -191,12 +370,12 @@ router.post('/', auth, upload.single('fichier'), validateDocInput, async (req, r
       titre,
       description,
       nom_fichier: req.file.filename,
-      nom_original: req.file.originalname,
+      nom_original: sanitizeOriginalName(req.file.originalname),
       type_fichier: req.file.mimetype,
       taille: req.file.size,
       chemin: req.file.path,
       proprietaire_id: req.user.id,
-      dossier_id: dossier || null,
+      dossier_id: folderCheck.value,
       date_expiration: dateExpiration,
       jours_alerte: joursAlerte,
     };
@@ -253,17 +432,38 @@ router.post('/', auth, upload.single('fichier'), validateDocInput, async (req, r
   }
 });
 
-router.put('/:id', auth, upload.single('fichier'), validateDocInput, async (req, res) => {
+router.put('/:id', auth, uploadLimiter, upload.single('fichier'), validateDocInput, async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      if (req.file) fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ errors: errors.array() });
+    }
 
     const doc = await canModifyDoc(req.params.id, req.user.id);
-    if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
+    if (!doc) {
+      if (req.file) fs.unlink(req.file.path, () => {});
+      return res.status(404).json({ message: 'Document non trouvé' });
+    }
+
+    if (req.file) {
+      const fileCheck = assertValidFile(req.file.path, req.file.mimetype);
+      if (!fileCheck.ok) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(415).json({ message: 'Contenu du fichier incohérent avec le type déclaré' });
+      }
+    }
 
     if (req.body.titre !== undefined) doc.titre = sanitizeString(req.body.titre);
     if (req.body.description !== undefined) doc.description = sanitizeString(req.body.description);
-    if (req.body.dossier !== undefined) doc.dossier_id = req.body.dossier || null;
+    if (req.body.dossier !== undefined) {
+      const folderCheck = await validateFolderOwnership(req.body.dossier, req.user.id);
+      if (!folderCheck.ok) {
+        if (req.file) fs.unlink(req.file.path, () => {});
+        return res.status(403).json({ message: 'Dossier invalide ou non autorisé' });
+      }
+      doc.dossier_id = folderCheck.value;
+    }
     if (req.body.favori !== undefined) doc.favori = req.body.favori === 'true' || req.body.favori === true;
     if (req.body.date_expiration !== undefined) doc.date_expiration = req.body.date_expiration || null;
     if (req.body.jours_alerte !== undefined) doc.jours_alerte = parseInt(req.body.jours_alerte) || 30;
@@ -275,7 +475,7 @@ router.put('/:id', auth, upload.single('fichier'), validateDocInput, async (req,
 
     if (req.file) {
       doc.nom_fichier = req.file.filename;
-      doc.nom_original = req.file.originalname;
+      doc.nom_original = sanitizeOriginalName(req.file.originalname);
       doc.type_fichier = req.file.mimetype;
       doc.taille = req.file.size;
       doc.chemin = req.file.path;
@@ -486,9 +686,9 @@ router.delete('/trash/empty', auth, async (req, res) => {
   }
 });
 
-router.get('/:id/versions', auth, async (req, res) => {
+router.get('/:id/versions', auth, ...idParam('id'), async (req, res) => {
   try {
-    const doc = await canModifyDoc(req.params.id, req.user.id);
+    const doc = await canAccessDoc(req.params.id, req.user.id);
     if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
 
     const versions = await Version.findAll({
@@ -606,68 +806,6 @@ router.post('/:id/unarchive', auth, async (req, res) => {
   } catch (error) {
     logger.error('Erreur unarchive:', error);
     res.status(500).json({ message: 'Erreur désarchivage' });
-  }
-});
-
-router.get('/download/:id', auth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    const doc = await Document.findOne({
-      where: { id: req.params.id }
-    });
-    if (!doc) return res.status(404).json({ message: 'Document non trouvé' });
-
-    const isOwner = doc.proprietaire_id === userId;
-    const perm = isOwner ? null : await Permission.findOne({
-      where: { document_id: doc.id, utilisateur_id: userId }
-    });
-    if (!isOwner && !perm) return res.status(403).json({ message: 'Accès non autorisé' });
-
-    logActivity({
-      userId: userId,
-      action: 'document_telecharge',
-      cibleType: 'document',
-      cibleId: doc.id,
-      description: `Document "${doc.titre}" téléchargé`,
-      req
-    });
-
-    if (doc.firebase_path) {
-      try {
-        if (doc.statut === 'archive') {
-          const compressed = await storage.downloadFile(doc.firebase_path);
-          if (compressed) {
-            const data = decompressBuffer(compressed);
-            res.setHeader('Content-Type', doc.type_fichier || 'application/octet-stream');
-            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(doc.nom_original)}"`);
-            res.setHeader('Content-Length', data.length);
-            return res.send(data);
-          }
-        } else {
-          const cloudUrl = await storage.getDownloadUrl(doc.firebase_path);
-          if (cloudUrl) return res.redirect(cloudUrl);
-        }
-      } catch (e) { logger.error('Erreur download cloud:', e); }
-    }
-
-    const filePath = path.resolve(doc.chemin);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: 'Fichier introuvable sur le disque' });
-    }
-    try {
-      const data = decryptFile(filePath);
-      res.setHeader('Content-Type', doc.type_fichier || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(doc.nom_original)}"`);
-      res.setHeader('Content-Length', data.length);
-      res.send(data);
-    } catch (e) {
-      logger.error('Erreur déchiffrement:', e);
-      res.download(filePath, doc.nom_original);
-    }
-  } catch (error) {
-    logger.error('Erreur download:', error);
-    res.status(500).json({ message: 'Erreur téléchargement' });
   }
 });
 

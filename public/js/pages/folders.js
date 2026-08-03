@@ -46,7 +46,7 @@ const FoldersPage = {
     } catch { document.getElementById('foldersContainer').innerHTML = '<p class="text-center text-muted">Erreur de chargement</p>'; }
   },
 
-  async showFolderModal(folder = null) {
+  async showFolderModal(folder = null, onCreated = null) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay active';
     overlay.innerHTML = `
@@ -79,10 +79,10 @@ const FoldersPage = {
       const nom = document.getElementById('folderName').value;
       const couleur = document.getElementById('folderColor').value;
       try {
-        if (folder) await API.updateFolder(folder.id, { nom, couleur });
-        else await API.createFolder({ nom, couleur });
+        const result = folder ? await API.updateFolder(folder.id, { nom, couleur }) : await API.createFolder({ nom, couleur });
         overlay.remove();
         App.showToast(folder ? 'Dossier modifié' : 'Dossier créé', 'success');
+        if (!folder && onCreated && result.folder) onCreated(result.folder);
         this.loadFolders();
       } catch (err) { App.showToast(err.message, 'error'); }
     };

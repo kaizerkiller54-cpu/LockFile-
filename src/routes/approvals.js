@@ -35,9 +35,12 @@ router.post('/documents/:id/approve', auth, requireOrg, [
     }
 
     const approbateur = await User.findByPk(req.body.approbateur_id, {
-      attributes: ['id', 'nom', 'prenom', 'email']
+      attributes: ['id', 'nom', 'prenom', 'email', 'type', 'actif']
     });
-    if (!approbateur) return res.status(404).json({ message: 'Approbateur non trouvé' });
+    if (!approbateur || !approbateur.actif) return res.status(404).json({ message: 'Approbateur non trouvé' });
+    if (approbateur.type !== 'organisation') {
+      return res.status(400).json({ message: 'L\'approbateur doit appartenir à une organisation' });
+    }
 
     const existing = await Approval.findOne({
       where: { document_id: doc.id, approbateur_id: req.body.approbateur_id, statut: 'en_attente' }

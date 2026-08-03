@@ -107,7 +107,6 @@ const SearchPage = {
             <td>${d.dossier?.nom || '-'}</td>
             <td>${tags || '-'}</td>
             <td><span class="doc-card-actions" style="position:static;opacity:1">
-              <i class="fas fa-eye btn-icon-sm text-primary" onclick="event.stopPropagation();App.openDocument('${d.id}','${d.type_fichier}','${cleanTitle}')" title="Visualiser"></i>
               <i class="fas fa-download btn-icon-sm" onclick="event.stopPropagation();App.downloadDocument('${d.id}')" title="Télécharger"></i>
               <i class="fas fa-trash btn-icon-sm text-danger" onclick="event.stopPropagation();App.confirmDelete('${d.id}')" title="Supprimer"></i>
             </span></td>
